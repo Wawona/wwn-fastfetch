@@ -8,6 +8,12 @@ let
   libff = if fastfetch != null then "${strip fastfetch}/lib/libfastfetch.a" else "";
 in
 if forceLoad && fastfetch != null && builtins.pathExists libff then
-  [ "-force_load" libff ]
+  [
+    "-force_load" libff
+    "-framework" "CoreFoundation"
+    "-framework" "Foundation"
+    "-framework" "IOKit"
+    "-framework" "VideoToolbox"
+  ]
 else
   [ ]
