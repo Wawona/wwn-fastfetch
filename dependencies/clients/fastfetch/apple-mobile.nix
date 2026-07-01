@@ -70,10 +70,18 @@ pkgs.stdenv.mkDerivation {
     cp ${./patches/displayserver_apple_mobile.c} ./displayserver_apple_mobile.c
     cp ${./patches/localip_apple_mobile.c} ./localip_apple_mobile.c
     cp ${./patches/sound_apple_mobile.c} ./sound_apple_mobile.c
+    cp ${./patches/smc_temps_apple_mobile.c} ./smc_temps_apple_mobile.c
+    cp ${./patches/cpu_apple_mobile.c} ./cpu_apple_mobile.c
+    cp ${./patches/host_apple_mobile.c} ./host_apple_mobile.c
+    cp ${./patches/os_apple_mobile.m} ./os_apple_mobile.m
     python3 apply-wawona-wayland-macos.py
     python3 patch-fastfetch-apple-mobile.py
     cp processing_apple_mobile.c src/common/impl/processing_linux.c
     cp netif_apple_mobile.c src/common/impl/netif_apple.c
+    cp smc_temps_apple_mobile.c src/common/apple/smc_temps.c
+    cp cpu_apple_mobile.c src/detection/cpu/cpu_apple.c
+    cp host_apple_mobile.c src/detection/host/host_apple.c
+    cp os_apple_mobile.m src/detection/os/os_apple.m
     cp displayserver_apple_mobile.c src/detection/displayserver/displayserver_apple.c
     cp localip_apple_mobile.c src/detection/localip/localip_linux.c
     cp sound_apple_mobile.c src/detection/sound/sound_nosupport.c

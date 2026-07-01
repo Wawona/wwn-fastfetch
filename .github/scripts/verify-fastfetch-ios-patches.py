@@ -19,6 +19,10 @@ def apply_patches(src: Path) -> None:
     for name, dest in (
         ("processing_apple_mobile.c", "src/common/impl/processing_linux.c"),
         ("netif_apple_mobile.c", "src/common/impl/netif_apple.c"),
+        ("smc_temps_apple_mobile.c", "src/common/apple/smc_temps.c"),
+        ("cpu_apple_mobile.c", "src/detection/cpu/cpu_apple.c"),
+        ("host_apple_mobile.c", "src/detection/host/host_apple.c"),
+        ("os_apple_mobile.m", "src/detection/os/os_apple.m"),
     ):
         (src / dest).write_text((PATCH_DIR / name).read_text())
 
@@ -45,6 +49,14 @@ def main() -> int:
         ds = (src / "src/detection/displayserver/displayserver_apple.c").read_text()
         if "WAYLAND_DISPLAY" not in ds:
             print("missing Wayland WM patch", file=sys.stderr)
+            return 1
+        smc = (src / "src/common/apple/smc_temps.c").read_text()
+        if "SMC unavailable on Apple mobile" not in smc:
+            print("missing Apple-mobile SMC stub", file=sys.stderr)
+            return 1
+        cpu = (src / "src/detection/cpu/cpu_apple.c").read_text()
+        if "#include <IOKit" in cpu or "smc_temps.h" in cpu:
+            print("cpu_apple.c still uses IOKit/SMC on Apple mobile", file=sys.stderr)
             return 1
     print("fastfetch patch anchors OK")
     return 0
