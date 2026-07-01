@@ -16,6 +16,30 @@ let
     inherit iosToolchain simulator;
   };
   appleCmake = import "${toolchainSrc}/dependencies/toolchains/apple-cmake-toolchain.nix";
+
+  # Per-platform capability tiering. watchOS has neither Metal nor VideoToolbox,
+  # so the Metal-backed GPU module and VideoToolbox-backed codec module are
+  # unavailable there and their sources/frameworks must be dropped.
+  isWatchOS = mobile.isWatchOS or false;
+  hasMetal = !isWatchOS; # iOS, iPadOS, tvOS, visionOS
+  hasVideoToolbox = !isWatchOS;
+
+  # Single source of truth for the frameworks the host app must link when it
+  # -force_load's libfastfetch.a. Emitted to $out/nix-support/fastfetch-frameworks
+  # so Wawona's xcodegen and fastfetch-ldflags.nix never hardcode per-platform
+  # framework knowledge. IOKit is intentionally omitted: all IORegistry/SMC
+  # detection paths are stubbed on Apple mobile.
+  fastfetchFrameworks =
+    [ "CoreFoundation" "Foundation" ]
+    ++ lib.optionals hasVideoToolbox [ "VideoToolbox" ]
+    ++ lib.optionals hasMetal [ "Metal" ];
+
+  platformDefine =
+    if isWatchOS then "-DWAWONA_APPLE_WATCHOS=1"
+    else if (mobile.isTVOS or false) then "-DWAWONA_APPLE_TVOS=1"
+    else if (mobile.isVisionOS or false) then "-DWAWONA_APPLE_VISIONOS=1"
+    else "-DWAWONA_APPLE_IOS=1";
+
   cmakeFlags = [
     "-DCMAKE_BUILD_TYPE=Release"
     "-DBINARY_LINK_TYPE=static"
@@ -68,12 +92,14 @@ pkgs.stdenv.mkDerivation {
     cp ${./patches/processing_apple_mobile.c} ./processing_apple_mobile.c
     cp ${./patches/netif_apple_mobile.c} ./netif_apple_mobile.c
     cp ${./patches/displayserver_apple_mobile.c} ./displayserver_apple_mobile.c
-    cp ${./patches/localip_apple_mobile.c} ./localip_apple_mobile.c
     cp ${./patches/sound_apple_mobile.c} ./sound_apple_mobile.c
     cp ${./patches/smc_temps_apple_mobile.c} ./smc_temps_apple_mobile.c
     cp ${./patches/cpu_apple_mobile.c} ./cpu_apple_mobile.c
     cp ${./patches/host_apple_mobile.c} ./host_apple_mobile.c
     cp ${./patches/os_apple_mobile.m} ./os_apple_mobile.m
+    cp ${./patches/gpu_apple_mobile.m} ./gpu_apple_mobile.m
+    cp ${./patches/wawona_ff_inprocess.h} ./wawona_ff_inprocess.h
+    cp ${./patches/wawona_ff_inprocess.c} ./wawona_ff_inprocess.c
     python3 apply-wawona-wayland-macos.py
     python3 patch-fastfetch-apple-mobile.py
     cp processing_apple_mobile.c src/common/impl/processing_linux.c
@@ -82,9 +108,14 @@ pkgs.stdenv.mkDerivation {
     cp cpu_apple_mobile.c src/detection/cpu/cpu_apple.c
     cp host_apple_mobile.c src/detection/host/host_apple.c
     cp os_apple_mobile.m src/detection/os/os_apple.m
+    cp gpu_apple_mobile.m src/detection/gpu/gpu_apple_mobile.m
     cp displayserver_apple_mobile.c src/detection/displayserver/displayserver_apple.c
-    cp localip_apple_mobile.c src/detection/localip/localip_linux.c
     cp sound_apple_mobile.c src/detection/sound/sound_nosupport.c
+    cp wawona_ff_inprocess.h src/wawona_ff_inprocess.h
+    cp wawona_ff_inprocess.c src/wawona_ff_inprocess.c
+  '' + lib.optionalString isWatchOS ''
+    # watchOS: no VideoToolbox -> replace the VideoToolbox-based codec detector.
+    cp ${./patches/codec_apple_mobile_stub.c} src/detection/codec/codec_apple.c
   '';
 
   buildPhase = ''
@@ -104,10 +135,17 @@ pkgs.stdenv.mkDerivation {
     ninja -C build libfastfetch
 
     OBJ_DIR=build/CMakeFiles/libfastfetch.dir
+    # fastfetch.c is the CLI entry (not part of the libfastfetch target). Compile
+    # it as fastfetch_main_impl and let wawona_ff_inprocess.c provide the public
+    # fastfetch_main wrapper (setjmp barrier + exit() redirect + per-run cleanup).
+    # Force-include the shim and define WAWONA_APPLE_MOBILE so the exit() macro and
+    # the atexit guard both apply here too.
     $XCODE_CLANG -c src/fastfetch.c \
       -I. -Ibuild -Isrc \
       -arch $IOS_ARCH -isysroot $SDKROOT $APPLE_DEPLOYMENT_FLAG -fPIC -O2 \
-      -DFASTFETCH_TARGET_BINARY_NAME=fastfetch -Dmain=fastfetch_main \
+      -DWAWONA_APPLE_MOBILE=1 ${platformDefine} \
+      -include src/wawona_ff_inprocess.h \
+      -DFASTFETCH_TARGET_BINARY_NAME=fastfetch -Dmain=fastfetch_main_impl \
       -o fastfetch_main.o
 
     find "$OBJ_DIR" -name '*.o' -print > objlist.txt
@@ -118,13 +156,17 @@ pkgs.stdenv.mkDerivation {
   '';
 
   installPhase = ''
-    mkdir -p $out/lib $out/include
+    mkdir -p $out/lib $out/include $out/nix-support
     cp libfastfetch.a $out/lib/
     cat > $out/include/fastfetch.h <<'EOF'
 #ifndef WAWONA_FASTFETCH_H
 #define WAWONA_FASTFETCH_H
 int fastfetch_main(int argc, char *argv[]);
 #endif
+EOF
+    # Single source of truth for host-app framework linking (per platform).
+    cat > $out/nix-support/fastfetch-frameworks <<'EOF'
+${lib.concatStringsSep "\n" fastfetchFrameworks}
 EOF
   '';
 

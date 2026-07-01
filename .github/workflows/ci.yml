@@ -26,6 +26,10 @@ jobs:
       - run: nix eval .#registryFragment --apply builtins.attrNames
       - run: |
           nix eval --raw .#packages.aarch64-darwin.fastfetch-ios.drvPath
+          nix eval --raw .#packages.aarch64-darwin.fastfetch-ipados.drvPath
+          nix eval --raw .#packages.aarch64-darwin.fastfetch-tvos.drvPath
+          nix eval --raw .#packages.aarch64-darwin.fastfetch-watchos.drvPath
+          nix eval --raw .#packages.aarch64-darwin.fastfetch-visionos.drvPath
           nix eval --raw .#packages.aarch64-darwin.fastfetch-android.drvPath
 
   build-ios:
@@ -40,6 +44,19 @@ jobs:
             sandbox = relaxed
             allow-import-from-derivation = true
       - run: nix build .#packages.aarch64-darwin.fastfetch-ios -L
+
+  build-watchos:
+    name: build fastfetch (watchOS, no Metal/VideoToolbox)
+    runs-on: macos-15
+    needs: eval
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+        with:
+          extra-conf: |
+            sandbox = relaxed
+            allow-import-from-derivation = true
+      - run: nix build .#packages.aarch64-darwin.fastfetch-watchos -L
 
   build-android:
     name: build fastfetch (Android)

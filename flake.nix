@@ -104,6 +104,10 @@
           fastfetch-android = tc.buildForAndroid "fastfetch" { };
         } // (if isDarwin then {
           fastfetch-ios = tc.buildForIOS "fastfetch" { };
+          fastfetch-ipados = tc.buildForIPadOS "fastfetch" { };
+          fastfetch-tvos = tc.buildForTVOS "fastfetch" { };
+          fastfetch-watchos = tc.buildForWatchOS "fastfetch" { };
+          fastfetch-visionos = tc.buildForVisionOS "fastfetch" { };
           fastfetch-macos = tc.buildForMacOS "fastfetch" { };
         } else { }));
 

@@ -1,5 +1,6 @@
 elseif(WAWONA_APPLE_MOBILE)
     list(APPEND LIBFASTFETCH_SRC
+        src/wawona_ff_inprocess.c
         src/common/impl/io_unix.c
         src/common/impl/netif_apple.c
         src/common/impl/networking_linux.c
@@ -34,7 +35,7 @@ elseif(WAWONA_APPLE_MOBILE)
         src/detection/diskio/diskio_nosupport.c
         src/detection/displayserver/displayserver_apple.c
         src/detection/font/font_nosupport.c
-        src/detection/gpu/gpu_nosupport.c
+        src/detection/gpu/gpu_apple_mobile.m
         src/detection/host/host_apple.c
         src/detection/icons/icons_nosupport.c
         src/detection/initsystem/initsystem_linux.c
