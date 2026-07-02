@@ -76,6 +76,9 @@ def check_patched_tree(src: Path) -> int:
     general = (src / "src/options/general.c").read_text()
     if "WAWONA_APPLE_MOBILE_PRERUN" not in general:
         return fail("missing preRun guard")
+    display = (src / "src/options/display.c").read_text()
+    if "options->pipe = false" not in display or "options->disableLinewrap = true" not in display:
+        return fail("display.c missing Apple-mobile forced TTY mode (colors + DECAWM off)")
     ds = (src / "src/detection/displayserver/displayserver_apple.c").read_text()
     if "WAYLAND_DISPLAY" not in ds:
         return fail("missing Wayland WM patch")

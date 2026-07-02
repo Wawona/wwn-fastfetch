@@ -562,3 +562,34 @@ const FFSmbiosHeaderTable* ffGetSmbiosHeaderTable() {
         raise SystemExit("smbios.c Apple branch tail anchor missing")
     text = text.replace(smbios_tail, smbios_tail_patch, 1)
     smbios.write_text(text)
+
+# --- display: force TTY mode (colors + DECAWM off) on Apple mobile --------------
+# In-process stdout may not pass isatty() at init; pipe mode strips ANSI escapes
+# and leaves autowrap enabled, so weston-terminal wraps instead of truncating.
+display_c = Path("src/options/display.c")
+text = display_c.read_text()
+if "WAWONA_APPLE_MOBILE" not in text:
+    display_anchor = """    options->pipe = !isatty(STDOUT_FILENO) || !!getenv("NO_COLOR");
+
+#ifdef NDEBUG
+    options->disableLinewrap = !options->pipe;
+#else
+    options->disableLinewrap = false;
+    options->debugMode = !!getenv("FF_DEBUG");
+#endif"""
+    display_patch = """#if defined(WAWONA_APPLE_MOBILE)
+    options->pipe = false;
+    options->disableLinewrap = true;
+#else
+    options->pipe = !isatty(STDOUT_FILENO) || !!getenv("NO_COLOR");
+
+#ifdef NDEBUG
+    options->disableLinewrap = !options->pipe;
+#else
+    options->disableLinewrap = false;
+    options->debugMode = !!getenv("FF_DEBUG");
+#endif
+#endif"""
+    if display_anchor not in text:
+        raise SystemExit("display.c ffOptionsInitDisplay pipe anchor missing")
+    display_c.write_text(text.replace(display_anchor, display_patch, 1))
