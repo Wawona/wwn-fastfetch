@@ -132,6 +132,8 @@ def check_patched_tree(src: Path) -> int:
     for label in ("iPadOS", "tvOS", "watchOS", "visionOS"):
         if label not in os_stub:
             return fail(f"os stub missing {label} label")
+    if 'ffStrbufSetStatic(&os->id, "macos")' not in os_stub:
+        return fail("os stub must set os->id to macos for Apple logo detection")
     gpu_stub = (PATCH_DIR / "gpu_apple_mobile.m").read_text()
     if "MTLCreateSystemDefaultDevice" not in gpu_stub or "TARGET_OS_WATCH" not in gpu_stub:
         return fail("gpu stub must use Metal and self-stub on watchOS")

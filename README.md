@@ -44,7 +44,7 @@ Frameworks are tiered in `apple-mobile.nix` and emitted to `$out/nix-support/fas
 | Wayland WM (env-based) | Y | Y | Y | Y | Y | off |
 | fork/exec/system | forbidden | forbidden | forbidden | forbidden | forbidden | allowed |
 
-watchOS omits Metal and VideoToolbox (and IOKit headers entirely): the GPU module self-stubs, the codec detector is swapped for a no-op, and those frameworks are dropped from the emitted manifest. OS labels are reported per platform (`iOS`/`iPadOS`/`tvOS`/`watchOS`/`visionOS`) via `TargetConditionals` + `hw.machine`.
+watchOS omits Metal and VideoToolbox (and IOKit headers entirely): the GPU module self-stubs, the codec detector is swapped for a no-op, and those frameworks are dropped from the emitted manifest. OS **names** are reported per platform (`iOS`/`iPadOS`/`tvOS`/`watchOS`/`visionOS`) via `TargetConditionals` + `hw.machine`; `os->id` is always `macos` so auto-detected logo matches macOS (Apple logo, not the unknown `?` art).
 
 ## Nix registry
 
