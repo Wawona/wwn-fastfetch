@@ -229,7 +229,76 @@ static void exitSignalHandler(FF_A_UNUSED int signal) {
     if signal_anchor not in text:
         raise SystemExit("init.c sigaction block anchor missing")
     text = text.replace(signal_anchor, signal_patch, 1)
+
+    # In-process re-entry guard. fastfetch runs repeatedly on the zsh pthread;
+    # wawona_ff_inprocess_run calls ffDestroyInstance() both before and after
+    # each run to start/leave the global FFinstance clean. ffDestroyInstance
+    # must therefore be a safe no-op on a pristine (zeroed BSS) or already-torn
+    # singleton, and ffInitInstance must record that the instance is live.
+    live_flag_anchor = "FFinstance instance; // Global singleton"
+    live_flag_patch = """FFinstance instance; // Global singleton
+#if defined(WAWONA_APPLE_MOBILE)
+// Tracks whether `instance` currently holds initialized resources, so the
+// per-run ffDestroyInstance() in wawona_ff_inprocess_run is idempotent.
+static bool ffInstanceLive = false;
+#endif"""
+    if live_flag_anchor not in text:
+        raise SystemExit("init.c instance singleton anchor missing")
+    text = text.replace(live_flag_anchor, live_flag_patch, 1)
+
+    init_set_anchor = """    defaultConfig();
+    initState(&instance.state);
+}"""
+    init_set_patch = """    defaultConfig();
+    initState(&instance.state);
+#if defined(WAWONA_APPLE_MOBILE)
+    ffInstanceLive = true;
+#endif
+}"""
+    if init_set_anchor not in text:
+        raise SystemExit("init.c ffInitInstance tail anchor missing")
+    text = text.replace(init_set_anchor, init_set_patch, 1)
+
+    destroy_anchor = """void ffDestroyInstance(void) {
+    destroyConfig();
+    destroyState();
+}"""
+    destroy_patch = """void ffDestroyInstance(void) {
+#if defined(WAWONA_APPLE_MOBILE)
+    // Idempotent on Apple mobile: never destroy a pristine (zeroed BSS) or
+    // already-destroyed singleton (see wawona_ff_inprocess_run pre/post reset).
+    if (!ffInstanceLive)
+        return;
+    ffInstanceLive = false;
+#endif
+    destroyConfig();
+    destroyState();
+}"""
+    if destroy_anchor not in text:
+        raise SystemExit("init.c ffDestroyInstance anchor missing")
+    text = text.replace(destroy_anchor, destroy_patch, 1)
+
     init_c.write_text(text)
+
+# In-process re-entry: ffPlatformInit re-runs on every fastfetch invocation on
+# the zsh pthread. Upstream re-inits the FFstrbuf/FFlist members without freeing
+# any prior contents, which leaks and can leave torn state across runs. Free
+# first on Apple mobile; ffStrbufDestroy/ffListDestroy are no-ops on a pristine
+# (zeroed BSS) struct, so this is safe on the first call too.
+ffplatform = Path("src/common/impl/FFPlatform.c")
+text = ffplatform.read_text()
+if "WAWONA_APPLE_MOBILE" not in text:
+    plat_anchor = """void ffPlatformInit(FFPlatform* platform) {
+    ffStrbufInit(&platform->homeDir);"""
+    plat_patch = """void ffPlatformInit(FFPlatform* platform) {
+#if defined(WAWONA_APPLE_MOBILE)
+    ffPlatformDestroy(platform);
+#endif
+    ffStrbufInit(&platform->homeDir);"""
+    if plat_anchor not in text:
+        raise SystemExit("FFPlatform.c ffPlatformInit anchor missing")
+    text = text.replace(plat_anchor, plat_patch, 1)
+    ffplatform.write_text(text)
 
 ffmain = Path("src/fastfetch.c")
 text = ffmain.read_text()
@@ -256,7 +325,135 @@ if "WAWONA_APPLE_MOBILE" not in text:
     if ret_anchor not in text:
         raise SystemExit("fastfetch.c main tail anchor missing")
     text = text.replace(ret_anchor, ret_patch, 1)
+
     ffmain.write_text(text)
+
+# Safety net for the in-process path: never iterate configDirs unless .data is a
+# real heap pointer. A torn singleton can leave length > 0 while .data is a stale
+# tag (0x1000000005), faulting on dir->length (EXC_BAD_ACCESS at 0x1000000009).
+fflist = Path("src/common/FFlist.h")
+text = fflist.read_text()
+if "ffListDataIsValid" not in text:
+    valid_anchor = """typedef struct FFlist {
+    uint8_t* data;
+    uint32_t length;
+    uint32_t capacity;
+} FFlist;"""
+    valid_patch = """typedef struct FFlist {
+    uint8_t* data;
+    uint32_t length;
+    uint32_t capacity;
+} FFlist;
+
+#if defined(WAWONA_APPLE_MOBILE)
+// iOS heap lives above the low 4GiB; torn singletons can leave a small integer
+// in .data while .length stays non-zero (ffListDestroy used to no-op on that).
+static inline bool ffListDataIsValid(const FFlist* list) {
+    return list->data != NULL && (uintptr_t) list->data >= 0x100000000ULL;
+}
+#endif"""
+    if valid_anchor not in text:
+        raise SystemExit("FFlist.h FFlist typedef anchor missing")
+    text = text.replace(valid_anchor, valid_patch, 1)
+
+if "ffListDataIsValid(list)" not in text:
+    destroy_anchor = """static inline void ffListDestroy(FFlist* list) {
+    if (!list->data) {
+        return;
+    }
+
+    // Avoid free-after-use. These 3 assignments are cheap so don't remove them
+    list->capacity = list->length = 0;
+    free(list->data);
+    list->data = NULL;
+}"""
+    destroy_patch = """static inline void ffListDestroy(FFlist* list) {
+#if defined(WAWONA_APPLE_MOBILE)
+    if (!ffListDataIsValid(list)) {
+        ffListInit(list);
+        return;
+    }
+#else
+    if (!list->data) {
+        return;
+    }
+#endif
+
+    // Avoid free-after-use. These 3 assignments are cheap so don't remove them
+    list->capacity = list->length = 0;
+    free(list->data);
+    list->data = NULL;
+}"""
+    if destroy_anchor not in text:
+        raise SystemExit("FFlist.h ffListDestroy anchor missing")
+    text = text.replace(destroy_anchor, destroy_patch, 1)
+fflist.write_text(text)
+
+ffmain = Path("src/fastfetch.c")
+text = ffmain.read_text()
+cfg_guard_strong = """#if defined(WAWONA_APPLE_MOBILE)
+    if (!ffListDataIsValid(&instance.state.platform.configDirs) ||
+        instance.state.platform.configDirs.length == 0) {
+        ffListInit(&instance.state.platform.configDirs);
+        return;
+    }
+#endif"""
+cfg_guard_weak = """#if defined(WAWONA_APPLE_MOBILE)
+    if (!instance.state.platform.configDirs.data ||
+        instance.state.platform.configDirs.length == 0)
+        return;
+#endif"""
+if cfg_guard_strong not in text:
+    if cfg_guard_weak in text:
+        text = text.replace(cfg_guard_weak, cfg_guard_strong, 1)
+    else:
+        cfg_anchor = """static void parseConfigFiles(FFdata* data) {
+    if (__builtin_expect(data->genConfigPath.length == 0, true)) {"""
+        cfg_patch = f"""static void parseConfigFiles(FFdata* data) {{
+{cfg_guard_strong}
+    if (__builtin_expect(data->genConfigPath.length == 0, true)) {{"""
+        if cfg_anchor not in text:
+            raise SystemExit("fastfetch.c parseConfigFiles anchor missing")
+        text = text.replace(cfg_anchor, cfg_patch, 1)
+    ffmain.write_text(text)
+
+ffplatform = Path("src/common/impl/FFPlatform.c")
+text = ffplatform.read_text()
+cfgdirs_anchor = """    FF_LIST_FOR_EACH (FFstrbuf, dir, platform->configDirs) {
+        ffStrbufDestroy(dir);
+    }
+    ffListDestroy(&platform->configDirs);
+
+    FF_LIST_FOR_EACH (FFstrbuf, dir, platform->dataDirs) {
+        ffStrbufDestroy(dir);
+    }
+    ffListDestroy(&platform->dataDirs);"""
+cfgdirs_patch = """#if defined(WAWONA_APPLE_MOBILE)
+    if (ffListDataIsValid(&platform->configDirs)) {
+#endif
+    FF_LIST_FOR_EACH (FFstrbuf, dir, platform->configDirs) {
+        ffStrbufDestroy(dir);
+    }
+#if defined(WAWONA_APPLE_MOBILE)
+    }
+#endif
+    ffListDestroy(&platform->configDirs);
+
+#if defined(WAWONA_APPLE_MOBILE)
+    if (ffListDataIsValid(&platform->dataDirs)) {
+#endif
+    FF_LIST_FOR_EACH (FFstrbuf, dir, platform->dataDirs) {
+        ffStrbufDestroy(dir);
+    }
+#if defined(WAWONA_APPLE_MOBILE)
+    }
+#endif
+    ffListDestroy(&platform->dataDirs);"""
+if "ffListDataIsValid(&platform->configDirs)" not in text:
+    if cfgdirs_anchor not in text:
+        raise SystemExit("FFPlatform.c configDirs destroy anchor missing")
+    text = text.replace(cfgdirs_anchor, cfgdirs_patch, 1)
+    ffplatform.write_text(text)
 
 io_unix = Path("src/common/impl/io_unix.c")
 text = io_unix.read_text()

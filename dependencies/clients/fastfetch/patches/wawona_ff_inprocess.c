@@ -45,6 +45,15 @@ int wawona_ff_inprocess_run(int (*fn)(int, char**), int argc, char** argv) {
     wawona_ff_active = 1;
     wawona_ff_code = 0;
 
+    /*
+     * Start every invocation from a clean global FFinstance. If a prior run was
+     * aborted (e.g. a fatal signal skipped the per-run cleanup below), the
+     * singleton can be left half-torn. ffDestroyInstance is idempotent on Apple
+     * mobile (guarded by an internal live flag), so this is a no-op on the first
+     * run and safe on every subsequent one.
+     */
+    if (ffDestroyInstance) ffDestroyInstance();
+
     if (setjmp(wawona_ff_jmp) == 0) {
         rc = fn(argc, argv);
     } else {

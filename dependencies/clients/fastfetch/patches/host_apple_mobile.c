@@ -45,6 +45,10 @@ static const FFAppleModelName modelNames[] = {
     { "iPhone17,3", "iPhone 16" },
     { "iPhone17,4", "iPhone 16 Plus" },
     { "iPhone17,5", "iPhone 16e" },
+    { "iPhone18,1", "iPhone 17 Pro" },
+    { "iPhone18,2", "iPhone 17 Pro Max" },
+    { "iPhone18,3", "iPhone 17" },
+    { "iPhone18,4", "iPhone Air" },
     // iPad
     { "iPad13,1", "iPad Air (4th generation)" },
     { "iPad13,2", "iPad Air (4th generation)" },

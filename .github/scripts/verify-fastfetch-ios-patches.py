@@ -8,6 +8,9 @@ Covers, in addition to the crash-fix stubs:
   * per-platform framework tiering + link hygiene (no IOKit; watchOS drops
     Metal/VideoToolbox) driven by the emitted nix-support manifest
   * banned syscalls across the authored mobile stub set
+  * in-process lifecycle re-entry guards (idempotent destroy/init, per-run
+    reset, defensive parseConfigFiles) that keep the singleton safe across
+    repeated runs on the zsh pthread
   * Android real-binary recipe left decoupled (its own patch/stubs)
 """
 from pathlib import Path
@@ -139,6 +142,31 @@ def check_patched_tree(src: Path) -> int:
     mob_link = mob_link.split("elseif(APPLE)")[0]
     if "IOKit" in mob_link or "VideoToolbox" in mob_link:
         return fail("mobile CMake link still hardcodes IOKit/VideoToolbox")
+
+    # --- Phase 5: in-process lifecycle re-entry guards ---
+    # A fatal signal skips the post-run cleanup, so the wrapper also resets the
+    # singleton before each run. Expect the reset both before setjmp and after.
+    if shim_c.count("if (ffDestroyInstance) ffDestroyInstance();") < 2:
+        return fail("wawona_ff_inprocess.c missing pre-run ffDestroyInstance reset")
+    # ffDestroyInstance/ffInitInstance made idempotent via a live flag.
+    if "ffInstanceLive" not in init:
+        return fail("init.c missing ffInstanceLive re-entry guard")
+    if "if (!ffInstanceLive)\n        return;" not in init:
+        return fail("init.c ffDestroyInstance not guarded by ffInstanceLive")
+    # ffPlatformInit frees prior resources before re-init on Apple mobile.
+    plat = (src / "src/common/impl/FFPlatform.c").read_text()
+    if "#if defined(WAWONA_APPLE_MOBILE)\n    ffPlatformDestroy(platform);" not in plat:
+        return fail("FFPlatform.c ffPlatformInit missing destroy-first re-entry guard")
+    # Defensive safety net: never iterate a torn/invalid configDirs.
+    if "ffListDataIsValid" not in (src / "src/common/FFlist.h").read_text():
+        return fail("FFlist.h missing ffListDataIsValid Apple-mobile guard")
+    if "ffListDataIsValid(&instance.state.platform.configDirs)" not in ffc:
+        return fail("fastfetch.c parseConfigFiles missing configDirs safety guard")
+    if "ffListDataIsValid(&platform->configDirs)" not in plat:
+        return fail("FFPlatform.c ffPlatformDestroy missing configDirs safety guard")
+    # Host marketing map covers the current device (iPhone Air / iPhone18,4).
+    if "iPhone18,4" not in host_stub or "iPhone Air" not in host_stub:
+        return fail("host stub missing iPhone18,4 (iPhone Air) mapping")
 
     return 0
 
