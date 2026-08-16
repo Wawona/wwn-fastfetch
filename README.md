@@ -1,5 +1,7 @@
 # wwn-fastfetch
 
+[![CI](https://github.com/Wawona/wwn-fastfetch/actions/workflows/ci.yml/badge.svg)](https://github.com/Wawona/wwn-fastfetch/actions/workflows/ci.yml)
+
 Wawona's port of [fastfetch](https://github.com/fastfetch-cli/fastfetch) — cross-compiled
 with [wwn-toolchain](https://github.com/Wawona/wwn-toolchain) for **macOS, Apple mobile,
 and Android**. Upstream 2.64.2 is fetched at build time and patched in-place (patch-overlay
