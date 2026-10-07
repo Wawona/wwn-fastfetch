@@ -37,8 +37,8 @@ AUTHORED_STUBS = (
     "smc_temps_apple_mobile.c",
     "cpu_apple_mobile.c",
     "host_apple_mobile.c",
-    "os_apple_mobile.m",
-    "gpu_apple_mobile.m",
+    "os_apple_mobile.c",
+    "gpu_apple_mobile.c",
     "codec_apple_mobile_stub.c",
     "wawona_ff_inprocess.c",
     "wawona_ff_inprocess.h",
@@ -60,8 +60,8 @@ def apply_patches(src: Path) -> None:
         ("smc_temps_apple_mobile.c", "src/common/apple/smc_temps.c"),
         ("cpu_apple_mobile.c", "src/detection/cpu/cpu_apple.c"),
         ("host_apple_mobile.c", "src/detection/host/host_apple.c"),
-        ("os_apple_mobile.m", "src/detection/os/os_apple.m"),
-        ("gpu_apple_mobile.m", "src/detection/gpu/gpu_apple_mobile.m"),
+        ("os_apple_mobile.c", "src/detection/os/os_apple.c"),
+        ("gpu_apple_mobile.c", "src/detection/gpu/gpu_apple_mobile.c"),
         ("wawona_ff_inprocess.h", "src/wawona_ff_inprocess.h"),
         ("wawona_ff_inprocess.c", "src/wawona_ff_inprocess.c"),
     ):
@@ -124,20 +124,20 @@ def check_patched_tree(src: Path) -> int:
     snippet = (PATCH_DIR / "cmake-apple-mobile-sources.snippet").read_text()
     if "src/wawona_ff_inprocess.c" not in snippet:
         return fail("snippet does not build the in-process wrapper")
-    if "gpu_nosupport.c" in snippet or "src/detection/gpu/gpu_apple_mobile.m" not in snippet:
-        return fail("GPU module not re-enabled (expected gpu_apple_mobile.m)")
+    if "gpu_nosupport.c" in snippet or "src/detection/gpu/gpu_apple_mobile.c" not in snippet:
+        return fail("GPU module not re-enabled (expected gpu_apple_mobile.c)")
     if "src/detection/localip/localip_linux.c" not in snippet:
         return fail("LocalIp module not enabled (expected localip_linux.c)")
     host_stub = (PATCH_DIR / "host_apple_mobile.c").read_text()
     if "hw.machine" not in host_stub or "iPhone" not in host_stub:
         return fail("host stub missing hw.machine marketing-name map")
-    os_stub = (PATCH_DIR / "os_apple_mobile.m").read_text()
+    os_stub = (PATCH_DIR / "os_apple_mobile.c").read_text()
     for label in ("iPadOS", "tvOS", "watchOS", "visionOS"):
         if label not in os_stub:
             return fail(f"os stub missing {label} label")
     if 'ffStrbufSetStatic(&os->id, "macos")' not in os_stub:
         return fail("os stub must set os->id to macos for Apple logo detection")
-    gpu_stub = (PATCH_DIR / "gpu_apple_mobile.m").read_text()
+    gpu_stub = (PATCH_DIR / "gpu_apple_mobile.c").read_text()
     if "MTLCreateSystemDefaultDevice" not in gpu_stub or "TARGET_OS_WATCH" not in gpu_stub:
         return fail("gpu stub must use Metal and self-stub on watchOS")
 

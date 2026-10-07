@@ -8,6 +8,8 @@
  * safe off the main thread and returns without any UI. Metal is unavailable on
  * watchOS, so this file self-stubs there (the Metal framework is also dropped
  * from the watchOS link by apple-mobile.nix framework tiering).
+ *
+ * Compiled as Objective-C (-x objective-c) so Metal can be used from a .c path.
  */
 
 #if defined(TARGET_OS_WATCH) && TARGET_OS_WATCH

@@ -35,7 +35,7 @@ elseif(WAWONA_APPLE_MOBILE)
         src/detection/diskio/diskio_nosupport.c
         src/detection/displayserver/displayserver_apple.c
         src/detection/font/font_nosupport.c
-        src/detection/gpu/gpu_apple_mobile.m
+        src/detection/gpu/gpu_apple_mobile.c
         src/detection/host/host_apple.c
         src/detection/icons/icons_nosupport.c
         src/detection/initsystem/initsystem_linux.c
@@ -51,7 +51,7 @@ elseif(WAWONA_APPLE_MOBILE)
         src/detection/mouse/mouse_nosupport.c
         src/detection/netio/netio_nosupport.c
         src/detection/opengl/opengl_apple.c
-        src/detection/os/os_apple.m
+        src/detection/os/os_apple.c
         src/detection/packages/packages_nosupport.c
         src/detection/poweradapter/poweradapter_nosupport.c
         src/detection/processes/processes_nosupport.c
@@ -71,3 +71,4 @@ elseif(WAWONA_APPLE_MOBILE)
         src/detection/wmtheme/wmtheme_nosupport.c
         src/detection/camera/camera_nosupport.c
     )
+    set_source_files_properties(src/detection/gpu/gpu_apple_mobile.c PROPERTIES COMPILE_FLAGS "-x objective-c")

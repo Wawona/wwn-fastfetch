@@ -96,8 +96,8 @@ pkgs.stdenv.mkDerivation {
     cp ${./patches/smc_temps_apple_mobile.c} ./smc_temps_apple_mobile.c
     cp ${./patches/cpu_apple_mobile.c} ./cpu_apple_mobile.c
     cp ${./patches/host_apple_mobile.c} ./host_apple_mobile.c
-    cp ${./patches/os_apple_mobile.m} ./os_apple_mobile.m
-    cp ${./patches/gpu_apple_mobile.m} ./gpu_apple_mobile.m
+    cp ${./patches/os_apple_mobile.c} ./os_apple_mobile.c
+    cp ${./patches/gpu_apple_mobile.c} ./gpu_apple_mobile.c
     cp ${./patches/wawona_ff_inprocess.h} ./wawona_ff_inprocess.h
     cp ${./patches/wawona_ff_inprocess.c} ./wawona_ff_inprocess.c
     python3 apply-wawona-wayland-macos.py
@@ -107,8 +107,8 @@ pkgs.stdenv.mkDerivation {
     cp smc_temps_apple_mobile.c src/common/apple/smc_temps.c
     cp cpu_apple_mobile.c src/detection/cpu/cpu_apple.c
     cp host_apple_mobile.c src/detection/host/host_apple.c
-    cp os_apple_mobile.m src/detection/os/os_apple.m
-    cp gpu_apple_mobile.m src/detection/gpu/gpu_apple_mobile.m
+    cp os_apple_mobile.c src/detection/os/os_apple.c
+    cp gpu_apple_mobile.c src/detection/gpu/gpu_apple_mobile.c
     cp displayserver_apple_mobile.c src/detection/displayserver/displayserver_apple.c
     cp sound_apple_mobile.c src/detection/sound/sound_nosupport.c
     cp wawona_ff_inprocess.h src/wawona_ff_inprocess.h
