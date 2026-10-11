@@ -129,6 +129,17 @@ pkgs.stdenv.mkDerivation {
     inherit simulator;
     minVersion = mobile.minVersion;
   }) + (appleCmake { inherit iosToolchain simulator; }) + ''
+    # .m is the OBJC language. C flags do not apply. Without the deployment
+    # min, clang uses the iPhoneOS SDK version and emits _objc_release_xN,
+    # which libobjc lacks before iOS 16.
+    if ! grep -q 'CMAKE_OBJC_FLAGS' ios-toolchain.cmake; then
+      cat >> ios-toolchain.cmake <<EOF
+set(CMAKE_OBJC_COMPILER "$XCODE_CLANG")
+set(CMAKE_OBJCXX_COMPILER "$XCODE_CLANGXX")
+set(CMAKE_OBJC_FLAGS "-arch $IOS_ARCH -target $APPLE_LINKER_TARGET -isysroot $SDKROOT $APPLE_DEPLOYMENT_FLAG -fPIC -fobjc-arc -Wno-unknown-warning-option")
+set(CMAKE_OBJCXX_FLAGS "-arch $IOS_ARCH -target $APPLE_LINKER_TARGET -isysroot $SDKROOT $APPLE_DEPLOYMENT_FLAG -fPIC -fobjc-arc -Wno-unknown-warning-option")
+EOF
+    fi
     cmake -S . -B build -G Ninja \
       -DCMAKE_TOOLCHAIN_FILE=$PWD/ios-toolchain.cmake \
       ${lib.concatStringsSep " " cmakeFlags}
