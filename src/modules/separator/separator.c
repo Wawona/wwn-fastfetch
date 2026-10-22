@@ -90,19 +90,23 @@ void ffParseSeparatorJsonObject(FFSeparatorOptions* options, yyjson_val* module)
         }
 
         if (unsafe_yyjson_equals_str(key, "times")) {
-            options->times = (uint32_t) yyjson_get_uint(val);
+            if (!ffJsonConfigParseUInt32(val, &options->times, UINT32_MAX)) {
+                ffPrintError(FF_MODULE_GET_DISPLAY_NAME(Separator), 0, nullptr, FF_PRINT_TYPE_NO_CUSTOM_KEY, "Property 'times' must be a non-negative integer no greater than 4294967295");
+                continue;
+            }
             continue;
         }
 
         if (unsafe_yyjson_equals_str(key, "length")) {
-            ffPrintError(FF_SEPARATOR_MODULE_NAME, 0, NULL, FF_PRINT_TYPE_NO_CUSTOM_KEY, "The option length has been renamed to times.");
+            ffPrintError(FF_MODULE_GET_DISPLAY_NAME(Separator), 0, nullptr, FF_PRINT_TYPE_NO_CUSTOM_KEY, "The option length has been renamed to times.");
             continue;
         }
 
-        ffPrintError(FF_SEPARATOR_MODULE_NAME, 0, NULL, FF_PRINT_TYPE_NO_CUSTOM_KEY, "Unknown JSON key %s", unsafe_yyjson_get_str(key));
+        ffPrintError(FF_MODULE_GET_DISPLAY_NAME(Separator), 0, nullptr, FF_PRINT_TYPE_NO_CUSTOM_KEY, "Unknown JSON key %s", unsafe_yyjson_get_str(key));
     }
 }
 
+[[gnu::cold]]
 void ffGenerateSeparatorJsonConfig(FFSeparatorOptions* options, yyjson_mut_doc* doc, yyjson_mut_val* module) {
     yyjson_mut_obj_add_strbuf(doc, module, "string", &options->string);
     yyjson_mut_obj_add_strbuf(doc, module, "outputColor", &options->outputColor);
@@ -117,14 +121,39 @@ void ffInitSeparatorOptions(FFSeparatorOptions* options) {
 
 void ffDestroySeparatorOptions(FFSeparatorOptions* options) {
     ffStrbufDestroy(&options->string);
+    ffStrbufDestroy(&options->outputColor);
 }
 
 FFModuleBaseInfo ffSeparatorModuleInfo = {
-    .name = FF_SEPARATOR_MODULE_NAME,
+    .name = "Separator",
     .description = "Print a separator line",
+    .displayName = {
+        .en = "Separator",
+        .ar = "الفاصل",
+        .cs = "Oddělovač",
+        .de = "Trennlinie",
+        .es = "Separador",
+        .fi = "Erotin",
+        .fr = "Séparateur",
+        .gl = "Separador",
+        .he = "מפריד",
+        .id = "Pemisah",
+        .it = "Separatore",
+        .ja = "セパレーター",
+        .ko = "구분선",
+        .pl = "Separator",
+        .pt = "Separador",
+        .ru = "Разделитель",
+        .tr = "Ayraç",
+        .uk = "Роздільник",
+        .vi = "Dấu phân cách",
+        .zh_CN = "分隔线",
+        .zh_TW = "分隔線",
+    },
     .initOptions = (void*) ffInitSeparatorOptions,
     .destroyOptions = (void*) ffDestroySeparatorOptions,
     .parseJsonObject = (void*) ffParseSeparatorJsonObject,
     .printModule = (void*) ffPrintSeparator,
     .generateJsonConfig = (void*) ffGenerateSeparatorJsonConfig,
+    .defaultOrder = 2,
 };

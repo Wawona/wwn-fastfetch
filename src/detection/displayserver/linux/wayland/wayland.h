@@ -13,12 +13,15 @@ static inline uint32_t min(uint32_t a, uint32_t b) {
     return a < b ? a : b;
 }
 
-typedef enum FF_A_PACKED WaylandProtocolType {
+typedef enum WaylandProtocolType: uint8_t {
     FF_WAYLAND_PROTOCOL_TYPE_NONE,
     FF_WAYLAND_PROTOCOL_TYPE_GLOBAL,
     FF_WAYLAND_PROTOCOL_TYPE_KDE_DEPRECATED,
     FF_WAYLAND_PROTOCOL_TYPE_KDE_REGISTRY,
 } WaylandProtocolType;
+
+// In case users have an ancient version of libwayland-client
+int wl_display_dispatch_timeout(struct wl_display *display, const struct timespec *timeout);
 
 typedef struct WaylandData {
     FFDisplayServerResult* result;
@@ -26,10 +29,15 @@ typedef struct WaylandData {
     FF_LIBRARY_SYMBOL(wl_proxy_add_listener)
     FF_LIBRARY_SYMBOL(wl_proxy_destroy)
     FF_LIBRARY_SYMBOL(wl_display_roundtrip)
+    union {
+        FF_LIBRARY_SYMBOL(wl_display_dispatch)
+        FF_LIBRARY_SYMBOL(wl_display_dispatch_timeout)
+    };
     struct wl_display* display;
     WaylandProtocolType protocolType;
     struct wl_proxy* zxdgOutputManager;
     struct wl_proxy* wpColorManager;
+    bool useMutter; // gnome-shell: read the display configuration from org.gnome.Mutter.DisplayConfig instead of guessing it
 } WaylandData;
 
 typedef struct WaylandDisplay {
@@ -55,14 +63,11 @@ typedef struct WaylandDisplay {
     bool hdrEnabled;
     uint16_t myear;
     uint16_t mweek;
-    uint32_t serial;
+    FFstrbuf serial;
     uint8_t bitDepth;
     bool primary;
+    bool done;
 } WaylandDisplay;
-
-inline static void stubListener(void* data, ...) {
-    (void) data;
-}
 
 inline static uint64_t ffWaylandGenerateIdFromName(const char* name) {
     uint64_t id = 0;
@@ -75,10 +80,11 @@ inline static uint64_t ffWaylandGenerateIdFromName(const char* name) {
     return id;
 }
 
-void ffWaylandOutputNameListener(void* data, FF_A_UNUSED void* output, const char* name);
-void ffWaylandOutputDescriptionListener(void* data, FF_A_UNUSED void* output, const char* description);
+void ffWaylandOutputNameListener(void* data, [[maybe_unused]] void* output, const char* name);
+void ffWaylandOutputDescriptionListener(void* data, [[maybe_unused]] void* output, const char* description);
 // Modifies content of display. Don't call this function when calling ffdsAppendDisplay
 uint32_t ffWaylandHandleRotation(WaylandDisplay* display);
+const char* ffWaylandWaitForDone(WaylandDisplay* display);
 
 const char* ffWaylandHandleGlobalOutput(WaylandData* wldata, struct wl_registry* registry, uint32_t name, uint32_t version);
 const char* ffWaylandHandleKdeOutputRegistry(WaylandData* wldata, struct wl_registry* registry, uint32_t name, uint32_t version);
@@ -86,5 +92,10 @@ const char* ffWaylandHandleKdeOutput(WaylandData* wldata, struct wl_registry* re
 const char* ffWaylandHandleKdeOutputOrder(WaylandData* wldata, struct wl_registry* registry, uint32_t name, uint32_t version);
 const char* ffWaylandHandleZxdgOutput(WaylandData* wldata, struct wl_registry* registry, uint32_t name, uint32_t version);
 const char* ffWaylandHandleWpColor(WaylandData* wldata, struct wl_registry* registry, uint32_t name, uint32_t version);
+
+    #if defined(FF_HAVE_DBUS) && defined(__linux__)
+bool ffdsMutterAvailable(void);
+bool ffdsConnectMutter(FFDisplayServerResult* result);
+    #endif
 
 #endif

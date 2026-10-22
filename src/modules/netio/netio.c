@@ -5,8 +5,6 @@
 #include "detection/netio/netio.h"
 #include "modules/netio/netio.h"
 
-#define FF_NETIO_DISPLAY_NAME "Network IO"
-
 static int sortInfs(const FFNetIOResult* left, const FFNetIOResult* right) {
     return ffStrbufComp(&left->name, &right->name);
 }
@@ -17,13 +15,14 @@ static void formatKey(const FFNetIOOptions* options, FFNetIOResult* inf, uint32_
             ffStrbufSetF(&inf->name, "unknown %u", (unsigned) index);
         }
 
-        ffStrbufSetF(key, FF_NETIO_DISPLAY_NAME " (%s)", inf->name.chars);
+        ffStrbufSetF(key, "%s (%s)", FF_MODULE_GET_DISPLAY_NAME(NetIO), inf->name.chars);
     } else {
         ffStrbufClear(key);
         FF_PARSE_FORMAT_STRING_CHECKED(key, &options->moduleArgs.key, ((FFformatarg[]) {
                                                                           FF_ARG(index, "index"),
-                                                                          FF_ARG(inf->name, "name"),
+                                                                          FF_ARG(inf->name, "ifname"),
                                                                           FF_ARG(options->moduleArgs.keyIcon, "icon"),
+                                                                          FF_ARG(FF_MODULE_GET_DISPLAY_NAME(NetIO), "module-name"),
                                                                       }));
     }
 }
@@ -33,7 +32,7 @@ bool ffPrintNetIO(FFNetIOOptions* options) {
     const char* error = ffDetectNetIO(&result, options);
 
     if (error) {
-        ffPrintError(FF_NETIO_DISPLAY_NAME, 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "%s", error);
+        ffPrintError(FF_MODULE_GET_DISPLAY_NAME(NetIO), 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "%s", error);
         return false;
     }
 
@@ -127,14 +126,21 @@ void ffParseNetIOJsonObject(FFNetIOOptions* options, yyjson_val* module) {
         }
 
         if (unsafe_yyjson_equals_str(key, "waitTime")) {
-            options->waitTime = (uint32_t) yyjson_get_uint(val);
+            if (!ffJsonConfigParseUInt32(val, &options->waitTime, UINT32_MAX)) {
+                ffPrintError(FF_MODULE_GET_DISPLAY_NAME(NetIO), 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "Property 'waitTime' must be a non-negative integer no greater than 4294967295");
+                continue;
+            }
+            if (options->waitTime == 0) {
+                options->waitTime = 1;
+            }
             continue;
         }
 
-        ffPrintError(FF_NETIO_MODULE_NAME, 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "Unknown JSON key %s", unsafe_yyjson_get_str(key));
+        ffPrintError(FF_MODULE_GET_DISPLAY_NAME(NetIO), 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "Unknown JSON key %s", unsafe_yyjson_get_str(key));
     }
 }
 
+[[gnu::cold]]
 void ffGenerateNetIOJsonConfig(FFNetIOOptions* options, yyjson_mut_doc* doc, yyjson_mut_val* module) {
     ffJsonConfigGenerateModuleArgsConfig(doc, module, &options->moduleArgs);
 
@@ -190,7 +196,7 @@ void ffInitNetIOOptions(FFNetIOOptions* options) {
 #endif
         ;
     options->detectTotal = false;
-    options->waitTime = 1000;
+    options->waitTime = 250;
 }
 
 void ffDestroyNetIOOptions(FFNetIOOptions* options) {
@@ -199,8 +205,31 @@ void ffDestroyNetIOOptions(FFNetIOOptions* options) {
 }
 
 FFModuleBaseInfo ffNetIOModuleInfo = {
-    .name = FF_NETIO_MODULE_NAME,
+    .name = "NetIO",
     .description = "Print network I/O throughput",
+    .displayName = {
+        .en = "Network I/O",
+        .ar = "إدخال/إخراج الشبكة",
+        .cs = "Síťové I/O",
+        .de = "Netzwerk I/O",
+        .es = "E/S de la red",
+        .fi = "Verkon I/O",
+        .fr = "E/S réseau",
+        .gl = "E/S da rede",
+        .he = "קלט/פלט רשת",
+        .id = "I/O Jaringan",
+        .it = "I/O di rete",
+        .ja = "ネットワークI/O",
+        .ko = "네트워크 I/O",
+        .pl = "I/O sieciowe",
+        .pt = "E/S de rede",
+        .ru = "Сетевой I/O",
+        .tr = "Ağ G/Ç",
+        .uk = "Мережа В/В",
+        .vi = "Mạng I/O",
+        .zh_CN = "网络 I/O",
+        .zh_TW = "網路 I/O",
+    },
     .initOptions = (void*) ffInitNetIOOptions,
     .destroyOptions = (void*) ffDestroyNetIOOptions,
     .parseJsonObject = (void*) ffParseNetIOJsonObject,
@@ -210,7 +239,7 @@ FFModuleBaseInfo ffNetIOModuleInfo = {
     .formatArgs = FF_FORMAT_ARG_LIST(((FFModuleFormatArg[]) {
         { "Size of data received [per second] (formatted)", "rx-size" },
         { "Size of data sent [per second] (formatted)", "tx-size" },
-        { "Interface name", "ifname" },
+        { "Interface name *", "ifname" },
         { "Is default route", "is-default-route" },
         { "Size of data received [per second] (in bytes)", "rx-bytes" },
         { "Size of data sent [per second] (in bytes)", "tx-bytes" },
@@ -220,5 +249,6 @@ FFModuleBaseInfo ffNetIOModuleInfo = {
         { "Number of errors sent [per second]", "tx-errors" },
         { "Number of packets dropped when receiving [per second]", "rx-drops" },
         { "Number of packets dropped when sending [per second]", "tx-drops" },
-    }))
+    })),
+    .defaultOrder = 67,
 };

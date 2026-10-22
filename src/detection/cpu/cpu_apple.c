@@ -1,4 +1,5 @@
 #include "cpu.h"
+#include "common/debug.h"
 #include "common/sysctl.h"
 #include "common/apple/smc_temps.h"
 #include "common/strutil.h"
@@ -6,13 +7,13 @@
 static double detectCpuTemp(const FFCPUOptions* options, const FFstrbuf* cpuName) {
     double result = 0;
 
-    const char* error = NULL;
+    const char* error = nullptr;
 
     if (options->tempSensor.length) {
         error = ffDetectSmcSpecificTemp(options->tempSensor.chars, &result);
     } else {
         if (ffStrbufStartsWithS(cpuName, "Apple M")) {
-            switch (strtol(cpuName->chars + strlen("Apple M"), NULL, 10)) {
+            switch (strtol(cpuName->chars + strlen("Apple M"), nullptr, 10)) {
                 case 1:
                     error = ffDetectSmcTemps(FF_TEMP_CPU_M1X, &result);
                     break;
@@ -24,6 +25,9 @@ static double detectCpuTemp(const FFCPUOptions* options, const FFstrbuf* cpuName
                     break;
                 case 4:
                     error = ffDetectSmcTemps(FF_TEMP_CPU_M4X, &result);
+                    break;
+                case 5:
+                    error = ffDetectSmcTemps(FF_TEMP_CPU_M5X, &result);
                     break;
                 default:
                     error = "Unsupported Apple Silicon CPU";
@@ -50,22 +54,26 @@ static const char* detectFrequency(FFCPUResult* cpu) {
 
     FF_IOOBJECT_AUTO_RELEASE io_registry_entry_t entryDevice = IOServiceGetMatchingService(MACH_PORT_NULL, IOServiceNameMatching("pmgr"));
     if (!entryDevice) {
+        FF_DEBUG("IOServiceGetMatchingService() failed");
         return "IOServiceGetMatchingService() failed";
     }
 
     if (!IOObjectConformsTo(entryDevice, "AppleARMIODevice")) {
+        FF_DEBUG("\"pmgr\" should conform to \"AppleARMIODevice\"");
         return "\"pmgr\" should conform to \"AppleARMIODevice\"";
     }
 
     FF_CFTYPE_AUTO_RELEASE CFDataRef freqProperty = (CFDataRef) IORegistryEntryCreateCFProperty(entryDevice, CFSTR("voltage-states5-sram"), kCFAllocatorDefault, kNilOptions);
     if (!freqProperty || CFGetTypeID(freqProperty) != CFDataGetTypeID()) {
+        FF_DEBUG("\"voltage-states5-sram\" in \"pmgr\" is not found");
         return "\"voltage-states5-sram\" in \"pmgr\" is not found";
     }
 
     // voltage-states5-sram stores supported <frequency / voltage> pairs of pcores from the lowest to the highest
     // voltage-states1-sram stores ecores'
     CFIndex propLength = CFDataGetLength(freqProperty);
-    if (propLength == 0 || propLength % (CFIndex) sizeof(uint32_t) * 2 != 0) {
+    if (propLength == 0 || propLength % (CFIndex) (sizeof(uint32_t) * 2) != 0) {
+        FF_DEBUG("Invalid \"voltage-states5-sram\" length");
         return "Invalid \"voltage-states5-sram\" length";
     }
 
@@ -83,7 +91,7 @@ static const char* detectFrequency(FFCPUResult* cpu) {
         }
     }
 
-    return NULL;
+    return nullptr;
 }
 #else
 static const char* detectFrequency(FFCPUResult* cpu) {
@@ -92,17 +100,18 @@ static const char* detectFrequency(FFCPUResult* cpu) {
     if (cpu->frequencyBase == 0) {
         unsigned current = 0;
         size_t size = sizeof(current);
-        if (sysctl((int[]) { CTL_HW, HW_CPU_FREQ }, 2, &current, &size, NULL, 0) == 0) {
+        if (sysctl((int[]) { CTL_HW, HW_CPU_FREQ }, 2, &current, &size, nullptr, 0) == 0) {
             cpu->frequencyBase = (uint32_t) (current / 1000 / 1000);
         }
     }
-    return NULL;
+    return nullptr;
 }
 #endif
 
 static const char* detectCoreCount(FFCPUResult* cpu) {
     uint32_t nPerfLevels = (uint32_t) ffSysctlGetInt("hw.nperflevels", 0);
     if (nPerfLevels <= 0) {
+        FF_DEBUG("sysctl(hw.nperflevels) failed");
         return "sysctl(hw.nperflevels) failed";
     }
 
@@ -117,11 +126,13 @@ static const char* detectCoreCount(FFCPUResult* cpu) {
             .count = (uint32_t) ffSysctlGetInt(sysctlKey, 0),
         };
     }
-    return NULL;
+    return nullptr;
 }
 
 const char* ffDetectCPUImpl(const FFCPUOptions* options, FFCPUResult* cpu) {
-    if (ffSysctlGetString("machdep.cpu.brand_string", &cpu->name) != NULL) {
+    const char* error = ffSysctlGetString("machdep.cpu.brand_string", &cpu->name);
+    if (error != nullptr) {
+        FF_DEBUG("sysctlbyname(machdep.cpu.brand_string) failed: %s", error);
         return "sysctlbyname(machdep.cpu.brand_string) failed";
     }
 
@@ -154,5 +165,5 @@ const char* ffDetectCPUImpl(const FFCPUOptions* options, FFCPUResult* cpu) {
 
     cpu->temperature = options->temp ? detectCpuTemp(options, &cpu->name) : FF_CPU_TEMP_UNSET;
 
-    return NULL;
+    return nullptr;
 }

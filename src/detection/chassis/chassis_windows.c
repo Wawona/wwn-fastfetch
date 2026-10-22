@@ -1,8 +1,9 @@
 #include "chassis.h"
+#include "common/debug.h"
 #include "common/smbios.h"
 
 // 7.4
-typedef struct FFSmbiosSystemEnclosure {
+typedef struct [[gnu::packed]] FFSmbiosSystemEnclosure {
     FFSmbiosHeader Header;
 
     uint8_t Manufacturer;   // string
@@ -24,7 +25,7 @@ typedef struct FFSmbiosSystemEnclosure {
     uint8_t ContainedElementCount; // varies
     uint8_t ContainedRecordLength; // varies
     uint8_t ContainedElements[];   // varies
-} FF_A_PACKED FFSmbiosSystemEnclosure;
+} FFSmbiosSystemEnclosure;
 
 static_assert(offsetof(FFSmbiosSystemEnclosure, ContainedElements) == 0x15,
     "FFSmbiosSystemEnclosure: Wrong struct alignment");
@@ -32,11 +33,13 @@ static_assert(offsetof(FFSmbiosSystemEnclosure, ContainedElements) == 0x15,
 const char* ffDetectChassis(FFChassisResult* result) {
     const FFSmbiosHeaderTable* smbiosTable = ffGetSmbiosHeaderTable();
     if (!smbiosTable) {
+        FF_DEBUG("System enclosure: failed to get SMBIOS data");
         return "Failed to get SMBIOS data";
     }
 
     const FFSmbiosSystemEnclosure* data = (const FFSmbiosSystemEnclosure*) (*smbiosTable)[FF_SMBIOS_TYPE_SYSTEM_ENCLOSURE];
     if (!data) {
+        FF_DEBUG("System enclosure: section is not found in SMBIOS data");
         return "System enclosure is not found in SMBIOS data";
     }
 
@@ -50,5 +53,5 @@ const char* ffDetectChassis(FFChassisResult* result) {
     ffCleanUpSmbiosValue(&result->version);
     ffStrbufSetStatic(&result->type, ffChassisTypeToString(data->Type));
 
-    return NULL;
+    return nullptr;
 }

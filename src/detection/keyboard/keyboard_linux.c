@@ -1,4 +1,5 @@
 #include "keyboard.h"
+#include "common/debug.h"
 #include "common/io.h"
 #include "common/strutil.h"
 
@@ -9,7 +10,8 @@ const char* ffDetectKeyboard(FFlist* devices /* List of FFKeyboardDevice */) {
     // This detects both wired and Bluetooth keyboards uniformly.
     FF_STRBUF_AUTO_DESTROY content = ffStrbufCreate();
     if (!ffAppendFileBuffer("/proc/bus/input/devices", &content)) {
-        return "ffAppendFileBuffer(\"/proc/bus/input/devices\") == NULL";
+        FF_DEBUG("ffAppendFileBuffer(\"/proc/bus/input/devices\") failed");
+        return "ffAppendFileBuffer(\"/proc/bus/input/devices\") == nullptr";
     }
 
     FFstrbuf kbd = ffStrbufCreateStatic("kbd");
@@ -19,7 +21,7 @@ const char* ffDetectKeyboard(FFlist* devices /* List of FFKeyboardDevice */) {
         .serial = ffStrbufCreate()
     };
 
-    char* line = NULL;
+    char* line = nullptr;
     size_t len = 0;
     while (ffStrbufGetline(&line, &len, &content)) {
         switch (line[0]) {
@@ -51,7 +53,7 @@ const char* ffDetectKeyboard(FFlist* devices /* List of FFKeyboardDevice */) {
                 if (ffStrStartsWith(bits, "EV=")) {
                     // Check EV_REP (auto-repeat, bit 20) to filter pseudo-keyboards (Power Button, PC Speaker).
                     const char* evBits = bits + strlen("EV=");
-                    uint64_t val = strtoull(evBits, NULL, 16);
+                    uint64_t val = strtoull(evBits, nullptr, 16);
                     if (!(val & (1ULL << EV_REP))) {
                         goto skipDevice;
                     }
@@ -63,7 +65,7 @@ const char* ffDetectKeyboard(FFlist* devices /* List of FFKeyboardDevice */) {
                     const char* lastWord = memrchr(keyBits, ' ', len - (size_t) (keyBits - line));
                     lastWord = lastWord ? lastWord + 1 : keyBits;
 
-                    uint64_t val = strtoull(lastWord, NULL, 16);
+                    uint64_t val = strtoull(lastWord, nullptr, 16);
                     if (!(val & (1ULL << KEY_A))) {
                         goto skipDevice;
                     }
@@ -100,5 +102,5 @@ const char* ffDetectKeyboard(FFlist* devices /* List of FFKeyboardDevice */) {
         ffStrbufDestroy(&device.serial);
     }
 
-    return NULL;
+    return nullptr;
 }

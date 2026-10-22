@@ -23,6 +23,8 @@ int shouldNotBeCalled(int c) {
     exit(1);
 }
 
+const FFstrbuf testCreateStatic = FF_STRBUF_STATIC("TEST");
+
 int main(void) {
     FFstrbuf strbuf;
 
@@ -414,7 +416,7 @@ int main(void) {
     ffStrbufInit(&strbuf);
     ffStrbufEnsureFixedLengthFree(&strbuf, 0);
     VERIFY(strbuf.length == 0);
-    VERIFY(strbuf.allocated == 0);
+    VERIFY(strbuf.allocated == 1);
     ffStrbufDestroy(&strbuf);
 
     // ffStrbufEnsureFixedLengthFree / empty buffer but oldFree >= newFree
@@ -680,6 +682,30 @@ int main(void) {
     }
 
     {
+        // ffStrbufMatchSeparatedNS with explicit compLength: the length-bounded
+        // contract is load-bearing for the Linux keyboard handler, which passes
+        // a fixed-size buffer length rather than a NUL-terminated string.
+        ffStrbufSetStatic(&strbuf, "abc");
+        VERIFY(ffStrbufMatchSeparatedNS(&strbuf, 11, "abc:def:ghi", ':') == true);
+        VERIFY(ffStrbufMatchSeparatedNS(&strbuf, 3, "abc:def:ghi", ':') == true);
+        VERIFY(ffStrbufMatchSeparatedNS(&strbuf, 7, "abc:def:ghi", ':') == true); // "abc:def"
+        VERIFY(ffStrbufMatchSeparatedNS(&strbuf, 4, "abc:def:ghi", ':') == true); // "abc:"
+        VERIFY(ffStrbufMatchSeparatedNS(&strbuf, 5, "abc:def:ghi", ':') == true); // "abc:d" truncated, but "abc" is a complete segment
+        VERIFY(ffStrbufMatchSeparatedNS(&strbuf, 3, "abd:def:ghi", ':') == false);
+        VERIFY(ffStrbufMatchSeparatedNS(&strbuf, 0, "abc:def:ghi", ':') == false);
+        VERIFY(ffStrbufMatchSeparatedNS(&strbuf, 0, "", ':') == false);
+        VERIFY(ffStrbufMatchSeparatedNS(&strbuf, 11, "abc:def:ghi", ' ') == false); // no separator in bounds
+        VERIFY(ffStrbufMatchSeparatedNS(&strbuf, 12, "abc:def:ghi\0j", ':') == true); // embedded NUL inside bounds
+
+        ffStrbufClear(&strbuf);
+        VERIFY(ffStrbufMatchSeparatedNS(&strbuf, 11, "abc:def:ghi", ':') == false); // no empty segment
+        VERIFY(ffStrbufMatchSeparatedNS(&strbuf, 8, "abc::def", ':') == true); // empty segment in the middle
+        VERIFY(ffStrbufMatchSeparatedNS(&strbuf, 4, "abc:", ':') == true); // trailing empty segment
+        VERIFY(ffStrbufMatchSeparatedNS(&strbuf, 4, ":abc", ':') == true); // leading empty segment
+        VERIFY(ffStrbufMatchSeparatedNS(&strbuf, 0, "abc", ':') == true); // empty separated string itself
+    }
+
+    {
         ffStrbufSetStatic(&strbuf, "ABC");
         VERIFY(ffStrbufMatchSeparatedIgnCaseS(&strbuf, "abc:def:ghi", ' ') == false);
         VERIFY(ffStrbufMatchSeparatedIgnCaseS(&strbuf, "abc:def:ghi", ':') == true);
@@ -717,6 +743,27 @@ int main(void) {
         VERIFY(ffStrbufSeparatedContainIgnCaseS(&strbuf, "a", ':') == false);
         VERIFY(ffStrbufSeparatedContainIgnCaseS(&strbuf, "e", ':') == false);
         VERIFY(ffStrbufSeparatedContainIgnCaseS(&strbuf, "i", ':') == false);
+    }
+
+    {
+        // ffStrbufSeparatedContainNS with empty strings: an empty list contains
+        // only the empty segment (symmetric to ffStrbufMatchSeparatedNS); an
+        // empty comp matches only an empty segment in the list.
+        ffStrbufClear(&strbuf);
+        VERIFY(ffStrbufSeparatedContainNS(&strbuf, 0, "", ':') == true); // empty list contains the empty segment
+        VERIFY(ffStrbufSeparatedContainNS(&strbuf, 3, "abc", ':') == false); // empty list contains no non-empty segment
+        VERIFY(ffStrbufSeparatedContainNS(&strbuf, 0, "abc", ':') == true); // compLength == 0 means an empty segment
+
+        ffStrbufSetStatic(&strbuf, "abc::def");
+        VERIFY(ffStrbufSeparatedContainNS(&strbuf, 0, "", ':') == true); // empty segment in the middle
+        ffStrbufSetStatic(&strbuf, "abc:");
+        VERIFY(ffStrbufSeparatedContainNS(&strbuf, 0, "", ':') == true); // trailing empty segment
+        ffStrbufSetStatic(&strbuf, ":abc");
+        VERIFY(ffStrbufSeparatedContainNS(&strbuf, 0, "", ':') == true); // leading empty segment
+        ffStrbufSetStatic(&strbuf, "abc:def");
+        VERIFY(ffStrbufSeparatedContainNS(&strbuf, 0, "", ':') == false); // no empty segment
+        ffStrbufSetStatic(&strbuf, "abc");
+        VERIFY(ffStrbufSeparatedContainNS(&strbuf, 0, "", ':') == false); // no empty segment
     }
 
     {
@@ -769,7 +816,7 @@ int main(void) {
         ffStrbufAppendUtf32CodePoint(&strbuf, 0x6587);
         ffStrbufAppendUtf32CodePoint(&strbuf, 0x6cc9);
         ffStrbufAppendUtf32CodePoint(&strbuf, 0x9a7f);
-        VERIFY(ffStrbufEqualS(&strbuf, u8"文泉驿"));
+        VERIFY(ffStrbufEqualS(&strbuf, (const char*) u8"文泉驿"));
 
         ffStrbufDestroy(&strbuf);
     }
@@ -1138,6 +1185,32 @@ int main(void) {
     VERIFY(ffStrbufEqualS(&strbuf, "STATIC"));
     VERIFY(strbuf.allocated == 0);
     ffStrbufDestroy(&strbuf);
+
+    #if FASTFETCH_STRBUF_DEFAULT_ALLOC == 32
+    ffStrbufEnsureFreeNoCheck(&strbuf, 1);
+    VERIFY(strbuf.allocated == 32);
+    ffStrbufDestroy(&strbuf);
+
+    ffStrbufEnsureFreeNoCheck(&strbuf, 31);
+    VERIFY(strbuf.allocated == 32);
+    ffStrbufDestroy(&strbuf);
+
+    ffStrbufEnsureFreeNoCheck(&strbuf, 32);
+    VERIFY(strbuf.allocated == 64);
+    ffStrbufDestroy(&strbuf);
+
+    ffStrbufEnsureFreeNoCheck(&strbuf, 33);
+    VERIFY(strbuf.allocated == 64);
+    ffStrbufDestroy(&strbuf);
+
+    ffStrbufEnsureFreeNoCheck(&strbuf, 63);
+    VERIFY(strbuf.allocated == 64);
+    ffStrbufDestroy(&strbuf);
+
+    ffStrbufEnsureFreeNoCheck(&strbuf, 64);
+    VERIFY(strbuf.allocated == 128);
+    ffStrbufDestroy(&strbuf);
+    #endif
 
     // Success
     puts("\e[32mAll tests passed!" FASTFETCH_TEXT_MODIFIER_RESET);

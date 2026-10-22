@@ -9,12 +9,12 @@ bool ffPrintVulkan(FFVulkanOptions* options) {
     const FFVulkanResult* vulkan = ffDetectVulkan();
 
     if (vulkan->error) {
-        ffPrintError(FF_VULKAN_MODULE_NAME, 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "%s", vulkan->error);
+        ffPrintError(FF_MODULE_GET_DISPLAY_NAME(Vulkan), 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "%s", vulkan->error);
         return false;
     }
 
     if (options->moduleArgs.outputFormat.length == 0) {
-        ffPrintLogoAndKey(FF_VULKAN_MODULE_NAME, 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT);
+        ffPrintLogoAndKey(FF_MODULE_GET_DISPLAY_NAME(Vulkan), 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT);
 
         if (vulkan->apiVersion.length == 0 && vulkan->driver.length == 0) {
             ffStrbufWriteTo(&vulkan->instanceVersion, stdout);
@@ -35,7 +35,7 @@ bool ffPrintVulkan(FFVulkanOptions* options) {
             putchar('\n');
         }
     } else {
-        FF_PRINT_FORMAT_CHECKED(FF_VULKAN_MODULE_NAME, 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, ((FFformatarg[]) {
+        FF_PRINT_FORMAT_CHECKED(FF_MODULE_GET_DISPLAY_NAME(Vulkan), 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, ((FFformatarg[]) {
                                                                                                            FF_ARG(vulkan->driver, "driver"),
                                                                                                            FF_ARG(vulkan->apiVersion, "api-version"),
                                                                                                            FF_ARG(vulkan->conformanceVersion, "conformance-version"),
@@ -54,15 +54,16 @@ void ffParseVulkanJsonObject(FFVulkanOptions* options, yyjson_val* module) {
             continue;
         }
 
-        ffPrintError(FF_VULKAN_MODULE_NAME, 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "Unknown JSON key %s", unsafe_yyjson_get_str(key));
+        ffPrintError(FF_MODULE_GET_DISPLAY_NAME(Vulkan), 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "Unknown JSON key %s", unsafe_yyjson_get_str(key));
     }
 }
 
+[[gnu::cold]]
 void ffGenerateVulkanJsonConfig(FFVulkanOptions* options, yyjson_mut_doc* doc, yyjson_mut_val* module) {
     ffJsonConfigGenerateModuleArgsConfig(doc, module, &options->moduleArgs);
 }
 
-bool ffGenerateVulkanJsonResult(FF_A_UNUSED FFVulkanOptions* options, yyjson_mut_doc* doc, yyjson_mut_val* module) {
+bool ffGenerateVulkanJsonResult([[maybe_unused]] FFVulkanOptions* options, yyjson_mut_doc* doc, yyjson_mut_val* module) {
     const FFVulkanResult* result = ffDetectVulkan();
 
     if (result->error) {
@@ -73,6 +74,7 @@ bool ffGenerateVulkanJsonResult(FF_A_UNUSED FFVulkanOptions* options, yyjson_mut
     yyjson_mut_val* obj = yyjson_mut_obj_add_obj(doc, module, "result");
     yyjson_mut_obj_add_strbuf(doc, obj, "apiVersion", &result->apiVersion);
     yyjson_mut_obj_add_strbuf(doc, obj, "conformanceVersion", &result->conformanceVersion);
+    yyjson_mut_obj_add_strbuf(doc, obj, "instanceVersion", &result->instanceVersion);
     yyjson_mut_obj_add_strbuf(doc, obj, "driver", &result->driver);
     yyjson_mut_val* gpus = yyjson_mut_obj_add_arr(doc, obj, "gpus");
     FF_LIST_FOR_EACH (FFGPUResult, vulkanGpu, result->gpus) {
@@ -96,7 +98,7 @@ bool ffGenerateVulkanJsonResult(FF_A_UNUSED FFVulkanOptions* options, yyjson_mut
             }
 
             if (vulkanGpu->dedicated.used != FF_GPU_VMEM_SIZE_UNSET) {
-                yyjson_mut_obj_add_uint(doc, dedicatedMemory, "used", vulkanGpu->dedicated.total);
+                yyjson_mut_obj_add_uint(doc, dedicatedMemory, "used", vulkanGpu->dedicated.used);
             } else {
                 yyjson_mut_obj_add_null(doc, dedicatedMemory, "used");
             }
@@ -116,8 +118,6 @@ bool ffGenerateVulkanJsonResult(FF_A_UNUSED FFVulkanOptions* options, yyjson_mut
                 yyjson_mut_obj_add_null(doc, sharedMemory, "used");
             }
         }
-
-        yyjson_mut_obj_add_uint(doc, gpuObj, "deviceId", vulkanGpu->deviceId);
     }
 
     return true;
@@ -132,8 +132,31 @@ void ffDestroyVulkanOptions(FFVulkanOptions* options) {
 }
 
 FFModuleBaseInfo ffVulkanModuleInfo = {
-    .name = FF_VULKAN_MODULE_NAME,
+    .name = "Vulkan",
     .description = "Print the highest Vulkan version supported by the GPU",
+    .displayName = {
+        .en = "Vulkan",
+        .ar = "Vulkan",
+        .cs = "Vulkan",
+        .de = "Vulkan",
+        .es = "Vulkan",
+        .fi = "Vulkan",
+        .fr = "Vulkan",
+        .gl = "Vulkan",
+        .he = "Vulkan",
+        .id = "Vulkan",
+        .it = "Vulkan",
+        .ja = "Vulkan",
+        .ko = "Vulkan",
+        .pl = "Vulkan",
+        .pt = "Vulkan",
+        .ru = "Vulkan",
+        .tr = "Vulkan",
+        .uk = "Vulkan",
+        .vi = "Vulkan",
+        .zh_CN = "Vulkan",
+        .zh_TW = "Vulkan",
+    },
     .initOptions = (void*) ffInitVulkanOptions,
     .destroyOptions = (void*) ffDestroyVulkanOptions,
     .parseJsonObject = (void*) ffParseVulkanJsonObject,
@@ -145,5 +168,6 @@ FFModuleBaseInfo ffVulkanModuleInfo = {
         { "API version", "api-version" },
         { "Conformance version", "conformance-version" },
         { "Instance version", "instance-version" },
-    }))
+    })),
+    .defaultOrder = 55,
 };

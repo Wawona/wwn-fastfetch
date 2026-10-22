@@ -1,17 +1,20 @@
 #include "host.h"
-#include "common/sysctl.h"
 #include "common/apple/cf_helpers.h"
+#include "common/debug.h"
+#include "common/sysctl.h"
 
 #include <IOKit/IOKitLib.h>
 
 const char* getProductNameWithIokit(FFstrbuf* result) {
     FF_IOOBJECT_AUTO_RELEASE io_registry_entry_t registryEntry = IORegistryEntryFromPath(MACH_PORT_NULL, "IODeviceTree:/product");
     if (!registryEntry) {
+        FF_DEBUG("IORegistryEntryFromPath(IODeviceTree:/product) failed");
         return "IOServiceGetMatchingService() failed";
     }
 
     FF_CFTYPE_AUTO_RELEASE CFStringRef productName = IORegistryEntryCreateCFProperty(registryEntry, CFSTR("product-name"), kCFAllocatorDefault, kNilOptions);
     if (!productName) {
+        FF_DEBUG("IORegistryEntryCreateCFProperty(product-name) failed");
         return "IORegistryEntryCreateCFProperty() failed";
     }
 
@@ -21,6 +24,7 @@ const char* getProductNameWithIokit(FFstrbuf* result) {
 const char* getOthersByIokit(FFHostResult* host) {
     FF_IOOBJECT_AUTO_RELEASE io_registry_entry_t registryEntry = IOServiceGetMatchingService(MACH_PORT_NULL, IOServiceMatching("IOPlatformExpertDevice"));
     if (!registryEntry) {
+        FF_DEBUG("IOServiceGetMatchingService(IOPlatformExpertDevice) failed");
         return "IOServiceGetMatchingService() failed";
     }
 
@@ -44,7 +48,7 @@ const char* getOthersByIokit(FFHostResult* host) {
         ffCfStrGetString(version, &host->version);
     }
 
-    return NULL;
+    return nullptr;
 }
 
 const char* ffDetectHost(FFHostResult* host) {
@@ -64,5 +68,5 @@ const char* ffDetectHost(FFHostResult* host) {
         ffStrbufSet(&host->name, &host->family);
     }
     getOthersByIokit(host);
-    return NULL;
+    return nullptr;
 }

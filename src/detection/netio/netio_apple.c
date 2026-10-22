@@ -1,8 +1,10 @@
 #include "netio.h"
 
+#include "common/debug.h"
 #include "common/netif.h"
 #include "common/mallocHelper.h"
 
+#include <errno.h>
 #include <net/if.h>
 #include <net/if_mib.h>
 #include <sys/sysctl.h>
@@ -11,14 +13,16 @@ const char* ffNetIOGetIoCounters(FFlist* result, FFNetIOOptions* options) {
     int mib[] = { CTL_NET, PF_LINK, NETLINK_GENERIC, options->defaultRouteOnly ? IFMIB_IFDATA : IFMIB_IFALLDATA, options->defaultRouteOnly ? (int) ffNetifGetDefaultRouteV4()->ifIndex : 0, IFDATA_GENERAL };
 
     size_t bufSize = 0;
-    if (sysctl(mib, ARRAY_SIZE(mib), NULL, &bufSize, 0, 0) < 0) {
-        return "sysctl(mib, ARRAY_SIZE(mib), NULL, &bufSize, 0, 0) failed";
+    if (sysctl(mib, ARRAY_SIZE(mib), nullptr, &bufSize, 0, 0) < 0) {
+        FF_DEBUG("sysctl(mib, ARRAY_SIZE(mib), nullptr, &bufSize, 0, 0) failed: %s", strerror(errno));
+        return "sysctl(mib, ARRAY_SIZE(mib), nullptr, &bufSize, 0, 0) failed";
     }
 
     assert(bufSize % sizeof(struct ifmibdata) == 0);
 
     FF_AUTO_FREE struct ifmibdata* buf = (struct ifmibdata*) malloc(bufSize);
     if (sysctl(mib, ARRAY_SIZE(mib), buf, &bufSize, 0, 0) < 0) {
+        FF_DEBUG("sysctl(mib, ARRAY_SIZE(mib), buf, &bufSize, 0, 0) failed: %s", strerror(errno));
         return "sysctl(mib, ARRAY_SIZE(mib), buf, &bufSize, 0, 0) failed";
     }
 
@@ -51,5 +55,5 @@ const char* ffNetIOGetIoCounters(FFlist* result, FFNetIOOptions* options) {
         };
     }
 
-    return NULL;
+    return nullptr;
 }

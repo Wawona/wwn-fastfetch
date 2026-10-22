@@ -6,6 +6,7 @@
 #include <dirent.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <string.h>
 
 // https://www.kernel.org/doc/Documentation/ABI/testing/sysfs-class-power
 
@@ -175,14 +176,15 @@ static bool parseBattery(int dfd, const char* id, FFBatteryOptions* options, FFl
 
 const char* ffDetectBattery(FFBatteryOptions* options, FFlist* results) {
     FF_AUTO_CLOSE_DIR DIR* dirp = opendir("/sys/class/power_supply/");
-    if (dirp == NULL) {
-        return "opendir(\"/sys/class/power_supply/\") == NULL";
+    if (dirp == nullptr) {
+        FF_DEBUG("opendir(\"/sys/class/power_supply/\") failed: %s", strerror(errno));
+        return "opendir(\"/sys/class/power_supply/\") == nullptr";
     }
 
     bool acConnected = false;
 
     struct dirent* entry;
-    while ((entry = readdir(dirp)) != NULL) {
+    while ((entry = readdir(dirp)) != nullptr) {
         if (entry->d_name[0] == '.') {
             continue;
         }
@@ -199,5 +201,5 @@ const char* ffDetectBattery(FFBatteryOptions* options, FFlist* results) {
         }
     }
 
-    return NULL;
+    return nullptr;
 }

@@ -1,4 +1,5 @@
 #include "fastfetch.h"
+#include "common/debug.h"
 #include "common/sysctl.h"
 #include "common/io.h"
 #include "battery.h"
@@ -6,23 +7,27 @@
 #include <dev/acpica/acpiio.h>
 #include <sys/ioctl.h>
 #include <sys/fcntl.h>
+#include <errno.h>
+#include <string.h>
 #include <unistd.h>
 
-const char* ffDetectBattery(FF_A_UNUSED FFBatteryOptions* options, FFlist* results) {
+const char* ffDetectBattery([[maybe_unused]] FFBatteryOptions* options, FFlist* results) {
     // https://www.freebsd.org/cgi/man.cgi?acpi_battery(4)
     // https://gitlab.xfce.org/panel-plugins/xfce4-battery-plugin/-/blob/master/panel-plugin/libacpi.c
 
     int units = ffSysctlGetInt("hw.acpi.battery.units", -100);
     if (units < 0) {
+        FF_DEBUG("sysctlbyname(\"hw.acpi.battery.units\") failed: %s", strerror(errno));
         return "sysctlbyname(\"hw.acpi.battery.units\") failed";
     }
 
     if (units == 0) {
-        return NULL;
+        return nullptr;
     }
 
     FF_AUTO_CLOSE_FD int acpifd = open("/dev/acpi", O_RDONLY | O_CLOEXEC);
     if (acpifd < 0) {
+        FF_DEBUG("open(\"/dev/acpi\", O_RDONLY | O_CLOEXEC) failed: %s", strerror(errno));
         return "open(\"/dev/acpi\", O_RDONLY | O_CLOEXEC) failed";
     }
 
@@ -86,5 +91,5 @@ const char* ffDetectBattery(FF_A_UNUSED FFBatteryOptions* options, FFlist* resul
         }
 #endif
     }
-    return NULL;
+    return nullptr;
 }

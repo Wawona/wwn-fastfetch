@@ -1,7 +1,8 @@
 #include "board.h"
+#include "common/debug.h"
 #include "common/smbios.h"
 
-typedef struct FFSmbiosBaseboard {
+typedef struct [[gnu::packed]] FFSmbiosBaseboard {
     FFSmbiosHeader Header;
 
     uint8_t Manufacturer;                   // string
@@ -15,7 +16,7 @@ typedef struct FFSmbiosBaseboard {
     uint8_t BoardType;                      // enum
     uint8_t NumberOfContainedObjectHandles; // varies
     uint16_t ContainedObjectHandles[];      // varies
-} FF_A_PACKED FFSmbiosBaseboard;
+} FFSmbiosBaseboard;
 
 static_assert(offsetof(FFSmbiosBaseboard, ContainedObjectHandles) == 0x0F,
     "FFSmbiosBaseboard: Wrong struct alignment");
@@ -23,11 +24,13 @@ static_assert(offsetof(FFSmbiosBaseboard, ContainedObjectHandles) == 0x0F,
 const char* ffDetectBoard(FFBoardResult* board) {
     const FFSmbiosHeaderTable* smbiosTable = ffGetSmbiosHeaderTable();
     if (!smbiosTable) {
+        FF_DEBUG("Baseboard information: failed to get SMBIOS data");
         return "Failed to get SMBIOS data";
     }
 
     const FFSmbiosBaseboard* data = (const FFSmbiosBaseboard*) (*smbiosTable)[FF_SMBIOS_TYPE_BASEBOARD_INFO];
     if (!data) {
+        FF_DEBUG("Baseboard information: section is not found in SMBIOS data");
         return "Baseboard information section is not found in SMBIOS data";
     }
 
@@ -42,5 +45,5 @@ const char* ffDetectBoard(FFBoardResult* board) {
     ffStrbufSetStatic(&board->version, ffSmbiosLocateString(strings, data->Version));
     ffCleanUpSmbiosValue(&board->version);
 
-    return NULL;
+    return nullptr;
 }

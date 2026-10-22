@@ -1,4 +1,5 @@
 #include "common/binary.h"
+#include "common/debug.h"
 
 #if defined(FF_HAVE_ELF) || defined(__sun) || (defined(__FreeBSD__) && !defined(__DragonFly__)) || defined(__OpenBSD__) || defined(__NetBSD__)
 
@@ -43,6 +44,7 @@ const char* ffBinaryExtractStrings(const char* elfFile, bool (*cb)(const char* s
         FF_LIBRARY_LOAD_MESSAGE(libelf, "libelf" FF_LIBRARY_EXTENSION, 1);
         FF_LIBRARY_LOAD_SYMBOL_VAR_MESSAGE(libelf, elfData, elf_version)
         if (elfData.ffelf_version(EV_CURRENT) == EV_NONE) {
+            FF_DEBUG("elf_version() failed");
             return "elf_version() failed";
         }
 
@@ -56,53 +58,57 @@ const char* ffBinaryExtractStrings(const char* elfFile, bool (*cb)(const char* s
         FF_LIBRARY_LOAD_SYMBOL_VAR_MESSAGE(libelf, elfData, elf_strptr)
         FF_LIBRARY_LOAD_SYMBOL_VAR_MESSAGE(libelf, elfData, elf_end)
 
-        libelf = NULL;
+        libelf = nullptr;
     }
 
-    if (elfData.ffelf_end == NULL) {
+    if (elfData.ffelf_end == nullptr) {
+        FF_DEBUG("load libelf failed");
         return "load libelf failed";
     }
 
     // Open the ELF file
     FF_AUTO_CLOSE_FD int fd = open(elfFile, O_RDONLY | O_CLOEXEC);
     if (fd < 0) {
+        FF_DEBUG("open(%s) failed: %s", elfFile, strerror(errno));
         return "open() failed";
     }
 
-    Elf* elf = elfData.ffelf_begin(fd, ELF_C_READ, NULL);
-    if (elf == NULL) {
+    Elf* elf = elfData.ffelf_begin(fd, ELF_C_READ, nullptr);
+    if (elf == nullptr) {
+        FF_DEBUG("elf_begin() failed");
         return "elf_begin() failed";
     }
 
     // Get the section header string table index
     size_t shstrndx = 0;
     if (elfData.ffelf_getshdrstrndx(elf, &shstrndx) < 0) {
+        FF_DEBUG("elf_getshdrstrndx() failed");
         elfData.ffelf_end(elf);
         return "elf_getshdrstrndx() failed";
     }
 
     // Iterate through all sections, looking for .rodata which contains string literals
-    Elf_Scn* scn = NULL;
-    while ((scn = elfData.ffelf_nextscn(elf, scn)) != NULL) {
+    Elf_Scn* scn = nullptr;
+    while ((scn = elfData.ffelf_nextscn(elf, scn)) != nullptr) {
         // Try 64-bit section header first, then 32-bit if that fails
         Elf64_Shdr* shdr64 = elfData.ffelf64_getshdr(scn);
-        Elf32_Shdr* shdr32 = NULL;
-        if (shdr64 == NULL) {
+        Elf32_Shdr* shdr32 = nullptr;
+        if (shdr64 == nullptr) {
             shdr32 = elfData.ffelf32_getshdr(scn);
-            if (shdr32 == NULL) {
+            if (shdr32 == nullptr) {
                 continue;
             }
         }
 
         // Get the section name and check if it's .rodata
         const char* name = elfData.ffelf_strptr(elf, shstrndx, shdr64 ? shdr64->sh_name : shdr32->sh_name);
-        if (name == NULL || !ffStrEquals(name, ".rodata")) {
+        if (name == nullptr || !ffStrEquals(name, ".rodata")) {
             continue;
         }
 
         // Get the section data
-        Elf_Data* data = elfData.ffelf_getdata(scn, NULL);
-        if (data == NULL) {
+        Elf_Data* data = elfData.ffelf_getdata(scn, nullptr);
+        if (data == nullptr) {
             continue;
         }
 
@@ -131,7 +137,7 @@ const char* ffBinaryExtractStrings(const char* elfFile, bool (*cb)(const char* s
     }
 
     elfData.ffelf_end(elf);
-    return NULL;
+    return nullptr;
 }
 
 #else
@@ -141,6 +147,7 @@ const char* ffBinaryExtractStrings(const char* elfFile, bool (*cb)(const char* s
  */
 const char* ffBinaryExtractStrings(const char* file, bool (*cb)(const char* str, uint32_t len, void* userdata), void* userdata, uint32_t minLength) {
     FF_UNUSED(file, cb, userdata, minLength);
+    FF_DEBUG("Fastfetch was built without libelf support");
     return "Fastfetch was built without libelf support";
 }
 

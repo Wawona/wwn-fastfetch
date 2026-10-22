@@ -23,7 +23,7 @@ static uint32_t getNumStringsImpl(const char* filename, const char* needle) {
     uint32_t count = 0;
     char* iter = content.chars;
     size_t needleLength = strlen(needle);
-    while ((iter = memmem(iter, content.length - (size_t) (iter - content.chars), needle, needleLength)) != NULL) {
+    while ((iter = memmem(iter, content.length - (size_t) (iter - content.chars), needle, needleLength)) != nullptr) {
         ++count;
         iter += needleLength;
     }
@@ -84,8 +84,8 @@ static uint32_t countFilesRecursiveImpl(FFstrbuf* baseDirPath, const char* filen
         return 1;
     }
 
-    DIR* dirp = opendir(baseDirPath->chars);
-    if (dirp == NULL) {
+    FF_AUTO_CLOSE_DIR DIR* dirp = opendir(baseDirPath->chars);
+    if (dirp == nullptr) {
         return 0;
     }
 
@@ -95,7 +95,7 @@ static uint32_t countFilesRecursiveImpl(FFstrbuf* baseDirPath, const char* filen
     uint32_t sum = 0;
 
     struct dirent* entry;
-    while ((entry = readdir(dirp)) != NULL) {
+    while ((entry = readdir(dirp)) != nullptr) {
         // According to the PMS, neither category nor package name can begin with '.', so no need to check for . or .. specifically
         if (entry->d_type != DT_DIR || entry->d_name[0] == '.') {
             continue;
@@ -106,7 +106,6 @@ static uint32_t countFilesRecursiveImpl(FFstrbuf* baseDirPath, const char* filen
         ffStrbufSubstrBefore(baseDirPath, baseDirPathLength);
     }
 
-    closedir(dirp);
     return sum;
 }
 
@@ -123,13 +122,13 @@ static uint32_t getNumElementsBySuffix(FFstrbuf* baseDir, const char* dirname, c
     ffStrbufAppendS(baseDir, dirname);
     FF_AUTO_CLOSE_DIR DIR* dirp = opendir(baseDir->chars);
     ffStrbufSubstrBefore(baseDir, baseDirLength);
-    if (dirp == NULL) {
+    if (dirp == nullptr) {
         return 0;
     }
 
     uint32_t count = 0;
     struct dirent* entry;
-    while ((entry = readdir(dirp)) != NULL) {
+    while ((entry = readdir(dirp)) != nullptr) {
         if (entry->d_name[0] != '.' && ffStrEndsWithIgnCase(entry->d_name, suffix)) {
             ++count;
         }
@@ -138,15 +137,15 @@ static uint32_t getNumElementsBySuffix(FFstrbuf* baseDir, const char* dirname, c
 }
 
 static uint32_t getXBPSImpl(FFstrbuf* baseDir) {
-    DIR* dir = opendir(baseDir->chars);
-    if (dir == NULL) {
+    FF_AUTO_CLOSE_DIR DIR* dir = opendir(baseDir->chars);
+    if (dir == nullptr) {
         return 0;
     }
 
     uint32_t result = 0;
 
     struct dirent* entry;
-    while ((entry = readdir(dir)) != NULL) {
+    while ((entry = readdir(dir)) != nullptr) {
         if (entry->d_type != DT_REG || !ffStrStartsWithIgnCase(entry->d_name, "pkgdb-")) {
             continue;
         }
@@ -157,7 +156,6 @@ static uint32_t getXBPSImpl(FFstrbuf* baseDir) {
         break;
     }
 
-    closedir(dir);
     return result;
 }
 
@@ -200,17 +198,17 @@ static uint32_t getRpmFromLibrpm(void) {
     // Don't print any error messages
     ffrpmlogSetMask(RPMLOG_MASK(RPMLOG_EMERG));
 
-    if (ffrpmReadConfigFiles(NULL, NULL) != 0) {
+    if (ffrpmReadConfigFiles(nullptr, nullptr) != 0) {
         return 0;
     }
 
     rpmts ts = ffrpmtsCreate();
-    if (ts == NULL) {
+    if (ts == nullptr) {
         return 0;
     }
 
-    rpmdbMatchIterator mi = ffrpmtsInitIterator(ts, RPMDBI_LABEL, NULL, 0);
-    if (mi == NULL) {
+    rpmdbMatchIterator mi = ffrpmtsInitIterator(ts, RPMDBI_LABEL, nullptr, 0);
+    if (mi == nullptr) {
         ffrpmtsFree(ts);
         return 0;
     }
@@ -234,7 +232,7 @@ static uint32_t getAMPackages(FFstrbuf* baseDir) {
 
     uint32_t result = 0;
     struct dirent* entry;
-    while ((entry = readdir(dirp)) != NULL) {
+    while ((entry = readdir(dirp)) != nullptr) {
         if (entry->d_name[0] == '.') {
             continue;
         }
@@ -332,14 +330,14 @@ static uint32_t getGuixPackages(FFstrbuf* baseDir, const char* dirname) {
 
 static inline uint32_t getFlatpakRuntimePackagesArch(FFstrbuf* baseDir) {
     FF_AUTO_CLOSE_DIR DIR* dirp = opendir(baseDir->chars);
-    if (dirp == NULL) {
+    if (dirp == nullptr) {
         return 0;
     }
 
     uint32_t num_elements = 0;
 
     struct dirent* entry;
-    while ((entry = readdir(dirp)) != NULL) {
+    while ((entry = readdir(dirp)) != nullptr) {
         if (entry->d_type == DT_DIR && entry->d_name[0] != '.') {
             num_elements += getNumElements(baseDir, entry->d_name, true);
         }
@@ -351,7 +349,7 @@ static inline uint32_t getFlatpakRuntimePackagesArch(FFstrbuf* baseDir) {
 static inline uint32_t getFlatpakRuntimePackages(FFstrbuf* baseDir) {
     ffStrbufAppendS(baseDir, "runtime/");
     FF_AUTO_CLOSE_DIR DIR* dirp = opendir(baseDir->chars);
-    if (dirp == NULL) {
+    if (dirp == nullptr) {
         return 0;
     }
 
@@ -359,7 +357,7 @@ static inline uint32_t getFlatpakRuntimePackages(FFstrbuf* baseDir) {
     uint32_t num_elements = 0;
 
     struct dirent* entry;
-    while ((entry = readdir(dirp)) != NULL) {
+    while ((entry = readdir(dirp)) != nullptr) {
         if (entry->d_type == DT_DIR && entry->d_name[0] != '.') {
             // `flatpak list` ignores `.Locale` and `.Debug` packages, and maybe others
             const char* dot = strrchr(entry->d_name, '.');
@@ -385,7 +383,7 @@ static inline uint32_t getFlatpakRuntimePackages(FFstrbuf* baseDir) {
 static inline uint32_t getFlatpakAppPackages(FFstrbuf* baseDir) {
     ffStrbufAppendS(baseDir, "app/");
     FF_AUTO_CLOSE_DIR DIR* dirp = opendir(baseDir->chars);
-    if (dirp == NULL) {
+    if (dirp == nullptr) {
         return 0;
     }
 
@@ -393,7 +391,7 @@ static inline uint32_t getFlatpakAppPackages(FFstrbuf* baseDir) {
     uint32_t num_elements = 0;
 
     struct dirent* entry;
-    while ((entry = readdir(dirp)) != NULL) {
+    while ((entry = readdir(dirp)) != nullptr) {
         if (entry->d_type == DT_DIR && entry->d_name[0] != '.') {
             ffStrbufAppendS(baseDir, entry->d_name);
             ffStrbufAppendS(baseDir, "/current");
@@ -458,9 +456,39 @@ static uint32_t getPacmanPackages(FFstrbuf* baseDir) {
     return getNumElements(baseDir, dbPath.chars, true);
 }
 
+static uint32_t getEmergePackagesImpl(FFstrbuf* baseDir) {
+    FF_AUTO_CLOSE_DIR DIR* dirp = opendir(baseDir->chars);
+    if (dirp == nullptr)
+        return 0;
+
+    uint32_t result = 0;
+
+    struct dirent *entry;
+    while ((entry = readdir(dirp)) != nullptr)
+    {
+        if (entry->d_type != DT_DIR || entry->d_name[0] == '.')
+            continue;
+
+        result += getNumElements(baseDir, entry->d_name, true);
+    }
+    return result;
+}
+
+static uint32_t getEmergePackages(FFstrbuf* baseDir, const char* dirname) {
+    uint32_t baseDirLength = baseDir->length;
+    ffStrbufAppendS(baseDir, dirname);
+    ffStrbufAppendC(baseDir, '/');
+    uint32_t result = getEmergePackagesImpl(baseDir);
+    ffStrbufSubstrBefore(baseDir, baseDirLength);
+    return result;
+}
+
 static void getPackageCounts(FFstrbuf* baseDir, FFPackagesResult* packageCounts, FFPackagesOptions* options) {
     if (FF_PACKAGES_IS_ENABLED(options, APK)) {
         packageCounts->apk += getNumStrings(baseDir, "/lib/apk/db/installed", "C:Q", "apk");
+    }
+    if (FF_PACKAGES_IS_ENABLED(options, CRUX)) {
+        packageCounts->crux += getNumStrings(baseDir, "/var/lib/pkg/db", "\n\n", "crux");
     }
     if (FF_PACKAGES_IS_ENABLED(options, DPKG)) {
         packageCounts->dpkg += getNumStrings(baseDir, "/var/lib/dpkg/status", "Status: install ok installed", "dpkg");
@@ -469,7 +497,7 @@ static void getPackageCounts(FFstrbuf* baseDir, FFPackagesResult* packageCounts,
         packageCounts->lpkg += getNumStrings(baseDir, "/opt/Loc-OS-LPKG/installed-lpkg/Listinstalled-lpkg.list", "\n", "lpkg");
     }
     if (FF_PACKAGES_IS_ENABLED(options, EMERGE)) {
-        packageCounts->emerge += countFilesRecursive(baseDir, "/var/db/pkg", "SIZE");
+        packageCounts->emerge += getEmergePackages(baseDir, "/var/db/pkg");
     }
     if (FF_PACKAGES_IS_ENABLED(options, EOPKG)) {
         packageCounts->eopkg += getNumElements(baseDir, "/var/lib/eopkg/package", true);
@@ -493,9 +521,15 @@ static void getPackageCounts(FFstrbuf* baseDir, FFPackagesResult* packageCounts,
     if (FF_PACKAGES_IS_ENABLED(options, PKGTOOL)) {
         packageCounts->pkgtool += getNumElements(baseDir, "/var/log/packages", false);
     }
+    if (FF_PACKAGES_IS_ENABLED(options, PORG)) {
+        packageCounts->porg += getNumElements(baseDir, "/var/log/porg", false);
+    }
     if (FF_PACKAGES_IS_ENABLED(options, RPM)) {
         // `Sigmd5` is the only table that doesn't contain the virtual `gpg-pubkey` package
         packageCounts->rpm += getSQLite3Int(baseDir, "/var/lib/rpm/rpmdb.sqlite", "SELECT count(*) FROM Sigmd5", "rpm");
+    }
+    if (FF_PACKAGES_IS_ENABLED(options, RUM)) {
+        packageCounts->rum += getSQLite3Int(baseDir, "/var/lib/rakuos/rum-rpmdb/rpmdb.sqlite", "SELECT count(*) FROM Sigmd5", "rum");
     }
     if (FF_PACKAGES_IS_ENABLED(options, SNAP)) {
         packageCounts->snap += getSnap(baseDir);
@@ -561,7 +595,7 @@ static void getPackageCountsBedrock(FFstrbuf* baseDir, FFPackagesResult* package
     ffStrbufAppendS(baseDir, "/bedrock/strata");
 
     FF_AUTO_CLOSE_DIR DIR* dir = opendir(baseDir->chars);
-    if (dir == NULL) {
+    if (dir == nullptr) {
         ffStrbufSubstrBefore(baseDir, baseDirLength);
         return;
     }
@@ -570,7 +604,7 @@ static void getPackageCountsBedrock(FFstrbuf* baseDir, FFPackagesResult* package
     uint32_t baseDirLength2 = baseDir->length;
 
     struct dirent* entry;
-    while ((entry = readdir(dir)) != NULL) {
+    while ((entry = readdir(dir)) != nullptr) {
         if (entry->d_type != DT_DIR) {
             continue;
         }
@@ -584,6 +618,25 @@ static void getPackageCountsBedrock(FFstrbuf* baseDir, FFPackagesResult* package
     }
 
     ffStrbufSubstrBefore(baseDir, baseDirLength);
+}
+
+static uint32_t getInstallReleasePackages(FFstrbuf* baseDir) {
+    uint32_t result = 0;
+
+    uint32_t baseDirLength = baseDir->length;
+    ffStrbufAppendS(baseDir, ".config/install_release/state.json");
+    if (ffPathExists(baseDir->chars, FF_PATHTYPE_ANY)) {
+        yyjson_doc* doc = yyjson_read_file(baseDir->chars, YYJSON_READ_NOFLAG, nullptr, nullptr);
+        if (doc != nullptr) {
+            yyjson_val* root = yyjson_doc_get_root(doc);
+            if (yyjson_is_obj(root)) {
+                result = (uint32_t) yyjson_obj_size(root);
+            }
+            yyjson_doc_free(doc);
+        }
+    }
+    ffStrbufSubstrBefore(baseDir, baseDirLength);
+    return result;
 }
 
 void ffDetectPackagesImpl(FFPackagesResult* result, FFPackagesOptions* options) {
@@ -647,5 +700,9 @@ void ffDetectPackagesImpl(FFPackagesResult* result, FFPackagesOptions* options) 
     if (FF_PACKAGES_IS_ENABLED(options, APPIMAGE)) {
         result->appimage += getNumElementsBySuffix(&baseDir, "/AppImages", ".appimage");
         result->appimage += getNumElementsBySuffix(&baseDir, "/Applications", ".appimage");
+    }
+
+    if (FF_PACKAGES_IS_ENABLED(options, INSTALLRELEASE)) {
+        result->installrelease = getInstallReleasePackages(&baseDir);
     }
 }

@@ -1,4 +1,5 @@
 #include "cpu.h"
+#include "common/debug.h"
 #include "common/io.h"
 #include "common/processing.h"
 #include "common/properties.h"
@@ -8,6 +9,7 @@
 
 #include <sys/sysinfo.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 #include <dirent.h>
 #include <fcntl.h>
@@ -69,7 +71,7 @@ static double detectCPUTemp(const FFCPUOptions* options) {
 
     if (options->tempSensor.length > 0) {
         FF_AUTO_CLOSE_FD int subfd = -1;
-        const char* fileName = NULL;
+        const char* fileName = nullptr;
         if (ffStrbufStartsWithS(&options->tempSensor, "hwmon") && ffCharIsDigit(options->tempSensor.chars[strlen("hwmon")])) {
             FF_AUTO_CLOSE_FD int dfd = open("/sys/class/hwmon/", O_PATH | O_CLOEXEC);
             subfd = openat(dfd, options->tempSensor.chars, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
@@ -115,7 +117,7 @@ static double detectCPUTemp(const FFCPUOptions* options) {
             int dfd = dirfd(dirp);
 
             struct dirent* entry;
-            while ((entry = readdir(dirp)) != NULL) {
+            while ((entry = readdir(dirp)) != nullptr) {
                 if (entry->d_name[0] == '.') {
                     continue;
                 }
@@ -137,7 +139,7 @@ static double detectCPUTemp(const FFCPUOptions* options) {
         if (dirp) {
             int dfd = dirfd(dirp);
             struct dirent* entry;
-            while ((entry = readdir(dirp)) != NULL) {
+            while ((entry = readdir(dirp)) != nullptr) {
                 if (entry->d_name[0] == '.') {
                     continue;
                 }
@@ -162,7 +164,7 @@ static double detectCPUTemp(const FFCPUOptions* options) {
         if (dirp) {
             int dfd = dirfd(dirp);
             struct dirent* entry;
-            while ((entry = readdir(dirp)) != NULL) {
+            while ((entry = readdir(dirp)) != nullptr) {
                 if (entry->d_name[0] == '.') {
                     continue;
                 }
@@ -193,7 +195,7 @@ static void detectNumaNodes(FFCPUResult* cpu) {
     }
 
     struct dirent* entry;
-    while ((entry = readdir(dir)) != NULL) {
+    while ((entry = readdir(dir)) != nullptr) {
         if (entry->d_type != DT_DIR && entry->d_type != DT_UNKNOWN) {
             continue;
         }
@@ -210,13 +212,19 @@ static void detectQualcomm(FFCPUResult* cpu) {
     // https://en.wikipedia.org/wiki/List_of_Qualcomm_Snapdragon_systems_on_chips
 
     assert(cpu->name.length >= 2);
-    uint32_t code = (uint32_t) strtoul(cpu->name.chars + 2, NULL, 10);
-    const char* name = NULL;
+    uint32_t code = (uint32_t) strtoul(cpu->name.chars + 2, nullptr, 10);
+    const char* name = nullptr;
 
     switch (code) {
+        case 8975:
+            name = "8 Elite Extreme Gen 6";
+            break;
+        case 8950:
+            name = "8 Elite Gen 6";
+            break;
         case 8845:
             name = "8 Gen 5";
-            break; // ?
+            break;
         case 8850:
             name = "8 Elite Gen 5";
             break;
@@ -237,6 +245,9 @@ static void detectQualcomm(FFCPUResult* cpu) {
             break;
         case 8475:
             name = "8+ Gen 1";
+            break;
+        case 8425:
+            name = "8+ Gen 1 4G";
             break;
         case 8450:
             name = "8 Gen 1";
@@ -271,11 +282,17 @@ static void detectQualcomm(FFCPUResult* cpu) {
         case 6475:
             name = "6 Gen 3";
             break;
+        case 6225:
+            name = "6s 4G Gen 2";
+            break;
         case 6115:
-            name = "6s Gen 1";
+            name = "6s 4G Gen 1";
             break;
         case 6450:
             name = "6 Gen 1";
+            break;
+        case 4850:
+            name = "4 Gen 5";
             break;
         case 4635:
             name = "4s Gen 2";
@@ -300,11 +317,14 @@ static void detectMediaTek(FFCPUResult* cpu) {
     // https://en.wikipedia.org/wiki/List_of_MediaTek_systems_on_chips
 
     assert(cpu->name.length >= 2);
-    uint32_t code = (uint32_t) strtoul(cpu->name.chars + 2, NULL, 10);
-    const char* name = NULL;
+    uint32_t code = (uint32_t) strtoul(cpu->name.chars + 2, nullptr, 10);
+    const char* name = nullptr;
 
     switch (code) // The SOC code of MTK Dimensity series is full of mess
     {
+        case 6995:
+            name = "9600 Pro";
+            break;
         case 6993:
             name = "9500";
             break;
@@ -353,10 +373,13 @@ static void detectExynos(FFCPUResult* cpu) {
     // https://en.wikipedia.org/wiki/Exynos
 
     assert(cpu->name.length > 3);
-    uint32_t code = (uint32_t) strtoul(cpu->name.chars + 3, NULL, 10);
-    const char* name = NULL;
+    uint32_t code = (uint32_t) strtoul(cpu->name.chars + 3, nullptr, 10);
+    const char* name = nullptr;
 
     switch (code) {
+        case 9975:
+            name = "2700";
+            break;
         case 9965:
             name = "2600";
             break;
@@ -374,6 +397,9 @@ static void detectExynos(FFCPUResult* cpu) {
             name = "2100";
             break;
 
+        case 8865:
+            name = "1680";
+            break;
         case 8855:
             name = "1580";
             break;
@@ -458,16 +484,15 @@ static void detectAndroid(FFCPUResult* cpu) {
     #include "cpu_arm.h"
 
 static void detectArmName(FFstrbuf* cpuinfo, FFCPUResult* cpu, uint32_t implId) {
-    char* line = NULL;
+    char* line = nullptr;
     size_t len = 0;
     uint32_t lastPartId = UINT32_MAX;
-    uint32_t num = 0;
     while (ffStrbufGetline(&line, &len, cpuinfo)) {
         if (!ffStrStartsWith(line, "CPU part\t: ")) {
             continue;
         }
-        uint32_t partId = (uint32_t) strtoul(line + strlen("CPU part\t: "), NULL, 16);
-        const char* name = NULL;
+        uint32_t partId = (uint32_t) strtoul(line + strlen("CPU part\t: "), nullptr, 16);
+        const char* name = nullptr;
         switch (implId) {
             case 0x41:
                 name = armPartId2name(partId);
@@ -529,10 +554,7 @@ static void detectArmName(FFstrbuf* cpuinfo, FFCPUResult* cpu, uint32_t implId) 
         }
         if (lastPartId != partId) {
             if (lastPartId != UINT32_MAX) {
-                if (num > 1) {
-                    ffStrbufAppendF(&cpu->name, "*%u", num);
-                }
-                ffStrbufAppendS(&cpu->name, " + ");
+                ffStrbufAppendC(&cpu->name, '+');
             }
             if (name) {
                 ffStrbufAppendS(&cpu->name, name);
@@ -542,13 +564,7 @@ static void detectArmName(FFstrbuf* cpuinfo, FFCPUResult* cpu, uint32_t implId) 
                 ffStrbufAppend(&cpu->name, &cpu->vendor);
             }
             lastPartId = partId;
-            num = 1;
-        } else {
-            ++num;
         }
-    }
-    if (num > 1) {
-        ffStrbufAppendF(&cpu->name, "*%u", num);
     }
 }
 #endif
@@ -556,12 +572,12 @@ static void detectArmName(FFstrbuf* cpuinfo, FFCPUResult* cpu, uint32_t implId) 
 static const char* parseCpuInfo(
     FFstrbuf* cpuinfo,
     FFCPUResult* cpu,
-    FF_A_UNUSED FFstrbuf* physicalCoresBuffer,
-    FF_A_UNUSED FFstrbuf* cpuMHz,
-    FF_A_UNUSED FFstrbuf* cpuIsa,
-    FF_A_UNUSED FFstrbuf* cpuUarch,
-    FF_A_UNUSED FFstrbuf* cpuImplementer) {
-    char* line = NULL;
+    [[maybe_unused]] FFstrbuf* physicalCoresBuffer,
+    [[maybe_unused]] FFstrbuf* cpuMHz,
+    [[maybe_unused]] FFstrbuf* cpuIsa,
+    [[maybe_unused]] FFstrbuf* cpuUarch,
+    [[maybe_unused]] FFstrbuf* cpuImplementer) {
+    char* line = nullptr;
     size_t len = 0;
 
     while (ffStrbufGetline(&line, &len, cpuinfo)) {
@@ -605,6 +621,9 @@ static const char* parseCpuInfo(
             (cpu->name.length == 0 && ffParsePropLine(line, "cpu :", &cpu->name)) ||
 #elif __sh__
             (cpu->name.length == 0 && ffParsePropLine(line, "cpu type :", &cpu->name)) ||
+#elif __sparc__ || __sparc
+            (cpu->name.length == 0 && ffParsePropLine(line, "cpu :", &cpu->name)) ||
+            (cpuMHz->length == 0 && ffParsePropLine(line, "Cpu0ClkTck :", cpuMHz)) ||
 #else
             (cpu->name.length == 0 && ffParsePropLine(line, "model name :", &cpu->name)) ||
             (cpu->name.length == 0 && ffParsePropLine(line, "model :", &cpu->name)) ||
@@ -616,7 +635,7 @@ static const char* parseCpuInfo(
             false);
     }
 
-    return NULL;
+    return nullptr;
 }
 
 static uint32_t getFrequency(int policyFd, const char* cpuinfoFileName, const char* scalingFileName, FFstrbuf* buffer) {
@@ -646,7 +665,7 @@ static bool detectFrequency(FFCPUResult* cpu, const FFCPUOptions* options) {
     FF_STRBUF_AUTO_DESTROY buffer = ffStrbufCreate();
 
     struct dirent* entry;
-    while ((entry = readdir(dir)) != NULL) {
+    while ((entry = readdir(dir)) != nullptr) {
         if (ffStrStartsWith(entry->d_name, "policy") && ffCharIsDigit(entry->d_name[strlen("policy")])) {
             FF_AUTO_CLOSE_FD int policyFd = openat(freqFd, entry->d_name, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_PATH);
             if (policyFd < 0) {
@@ -666,7 +685,7 @@ static bool detectFrequency(FFCPUResult* cpu, const FFCPUOptions* options) {
                 cpu->frequencyMax = fmax;
             }
 
-            uint32_t fbase = getFrequency(policyFd, "base_frequency", NULL, &buffer);
+            uint32_t fbase = getFrequency(policyFd, "base_frequency", nullptr, &buffer);
             if (fbase > 0) {
                 cpu->frequencyBase = cpu->frequencyBase > fbase ? cpu->frequencyBase : fbase;
             }
@@ -689,16 +708,83 @@ static bool detectFrequency(FFCPUResult* cpu, const FFCPUOptions* options) {
     return true;
 }
 
+bool ffCPUQualcommSnapdragonToName(FFstrbuf* name, char* compatibles) {
+    // While this also would be 555 below split it out as it's only seen on the devkit
+    for (char* p = compatibles; *p; p += strlen(p) + 1) {
+        if (strstr(p, "x1e001de") != nullptr) {
+            ffStrbufSetS(name, "Qualcomm Snapdragon X Elite X1E-00-1DE");
+            return true;
+        }
+    }
+
+    // https://github.com/tianocore/edk2-platforms/blob/9c2cdde/Silicon/Qualcomm/Common/QualcommCommonSiliconPkg/Include/ChipInfoDefs.h
+    char content[16];
+    ssize_t length = ffReadFileData("/sys/devices/soc0/soc_id", ARRAY_SIZE(content), content);
+    if (length < 1) {
+        return false;
+    }
+    if (content[length - 1] != '\n') {
+        return false; // must end with \n
+    }
+
+    unsigned long long soc_id = strtoull(content, nullptr, 10);
+    const char* soc = nullptr;
+    switch (soc_id) {
+        // glymur
+        case 662:
+            soc = "X2 Elite Extreme X2E-94/96-100";
+            break;
+        case 698:
+            soc = "X2 Elite X2E-88/90-100";
+            break;
+        // mahua
+        case 699:
+            soc = "X2 Elite X2E-80/84-100";
+            break;
+        case 693:
+            soc = "X2 Elite X2E-78-100";
+            break;
+        case 728:
+            soc = "X2 Plus X2P-64-100";
+            break;
+        // kalambo
+        case 719:
+            soc = "X2 Plus X2P-42-100";
+            break;
+        // hamoa
+        case 555:
+            soc = "X Elite X1E-78/80/84-100";
+            break;
+        case 615:
+            soc = "X Plus X1P-64/66-100";
+            break;
+        case 616:
+            soc = "X X1-26-101";
+            break;
+        // purwa
+        case 635:
+            soc = "X X1-26-100 / X Plus X1P-42/46-100";
+            break;
+    }
+    if (soc) {
+        ffStrbufSetS(name, "Qualcomm Snapdragon ");
+        ffStrbufAppendS(name, soc);
+        return true;
+    }
+
+    return false;
+}
+
 #if __i386__ || __x86_64__
 
-FF_A_UNUSED static uint16_t getPackageCount(FFstrbuf* cpuinfo) {
+[[maybe_unused]] static uint16_t getPackageCount(FFstrbuf* cpuinfo) {
     const char* p = cpuinfo->chars;
     uint64_t low = 0, high = 0;
 
     while ((p = memmem(p, cpuinfo->length - (uint32_t) (p - cpuinfo->chars), "\nphysical id\t:", strlen("\nphysical id\t:")))) {
         p += strlen("\nphysical id\t:");
         char* pend;
-        unsigned long long id = strtoul(p, &pend, 10);
+        unsigned long id = strtoul(p, &pend, 10);
         if (__builtin_expect(id > 64, false)) { // Do 129-socket boards exist?
             high |= 1ULL << (id - 64);
         } else {
@@ -710,7 +796,7 @@ FF_A_UNUSED static uint16_t getPackageCount(FFstrbuf* cpuinfo) {
     return (uint16_t) (__builtin_popcountll(low) + __builtin_popcountll(high));
 }
 
-FF_A_UNUSED static const char* detectCPUX86(const FFCPUOptions* options, FFCPUResult* cpu) {
+[[maybe_unused]] static const char* detectCPUX86(const FFCPUOptions* options, FFCPUResult* cpu) {
     FF_STRBUF_AUTO_DESTROY cpuinfo = ffStrbufCreateA(PROC_FILE_BUFFSIZ);
     if (!ffReadFileBuffer(FF_CPUINFO_PATH, &cpuinfo) || cpuinfo.length == 0) {
         return "ffReadFileBuffer(\"" FF_CPUINFO_PATH "\") failed";
@@ -718,7 +804,7 @@ FF_A_UNUSED static const char* detectCPUX86(const FFCPUOptions* options, FFCPURe
 
     FF_STRBUF_AUTO_DESTROY physicalCoresBuffer = ffStrbufCreate();
     FF_STRBUF_AUTO_DESTROY cpuMHz = ffStrbufCreate();
-    const char* error = parseCpuInfo(&cpuinfo, cpu, &physicalCoresBuffer, &cpuMHz, NULL, NULL, NULL);
+    const char* error = parseCpuInfo(&cpuinfo, cpu, &physicalCoresBuffer, &cpuMHz, nullptr, nullptr, nullptr);
     if (error) {
         return error;
     }
@@ -739,7 +825,7 @@ FF_A_UNUSED static const char* detectCPUX86(const FFCPUOptions* options, FFCPURe
 
     detectNumaNodes(cpu);
 
-    return NULL;
+    return nullptr;
 }
 
 #else
@@ -747,11 +833,13 @@ FF_A_UNUSED static const char* detectCPUX86(const FFCPUOptions* options, FFCPURe
 static const char* detectPhysicalCores(FFCPUResult* cpu) {
     int dfd = open("/sys/devices/system/cpu/", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
     if (dfd < 0) {
+        FF_DEBUG("open(/sys/devices/system/cpu/) failed: %s", strerror(errno));
         return "open(\"/sys/devices/system/cpu/\") failed";
     }
 
     FF_AUTO_CLOSE_DIR DIR* dir = fdopendir(dfd);
     if (!dir) {
+        FF_DEBUG("fdopendir(/sys/devices/system/cpu/) failed: %s", strerror(errno));
         close(dfd);
         return "fdopendir(dfd) failed";
     }
@@ -760,7 +848,7 @@ static const char* detectPhysicalCores(FFCPUResult* cpu) {
 
     struct dirent* entry;
     FF_LIST_AUTO_DESTROY cpuList = ffListCreate();
-    while ((entry = readdir(dir)) != NULL) {
+    while ((entry = readdir(dir)) != nullptr) {
         if (entry->d_type != DT_DIR || !ffStrStartsWith(entry->d_name, "cpu") || !ffCharIsDigit(entry->d_name[strlen("cpu")])) {
             continue;
         }
@@ -778,11 +866,14 @@ static const char* detectPhysicalCores(FFCPUResult* cpu) {
         ssize_t len = ffReadFileDataRelative(cpuxfd, "topology/physical_package_id", sizeof(buf) - 1, buf);
         if (len > 0) {
             buf[len] = '\0';
-            unsigned long long id = strtoul(buf, NULL, 10);
-            if (__builtin_expect(id > 64, false)) { // Do 129-socket boards exist?
-                pkgHigh |= 1ULL << (id - 64);
-            } else if (__builtin_expect(id <= 64, true)) {
-                pkgLow |= 1ULL << id;
+            unsigned long long id = strtoull(buf, nullptr, 10);
+            if (__builtin_expect(id < 128, true)) {
+                // Do 129-socket boards exist?
+                if (__builtin_expect(id >= 64, false)) {
+                    pkgHigh |= 1ULL << (id - 64);
+                } else {
+                    pkgLow |= 1ULL << id;
+                }
             }
         }
 
@@ -817,10 +908,10 @@ static const char* detectPhysicalCores(FFCPUResult* cpu) {
 
     cpu->coresPhysical = (uint16_t) cpuList.length;
     cpu->packages = (uint16_t) (__builtin_popcountll(pkgLow) + __builtin_popcountll(pkgHigh));
-    return NULL;
+    return nullptr;
 }
 
-FF_A_UNUSED static void parseIsa(FFstrbuf* cpuIsa) {
+[[maybe_unused]] static void parseIsa(FFstrbuf* cpuIsa) {
     // Always use the last part of the ISA string. Ref: #590 #1204
     ffStrbufSubstrAfterLastC(cpuIsa, ' ');
 
@@ -840,7 +931,7 @@ FF_A_UNUSED static void parseIsa(FFstrbuf* cpuIsa) {
     }
 }
 
-FF_A_UNUSED static void detectSocName(FFCPUResult* cpu) {
+[[maybe_unused]] static void detectSocName(FFCPUResult* cpu) {
     if (cpu->name.length > 0) {
         return;
     }
@@ -858,8 +949,8 @@ FF_A_UNUSED static void detectSocName(FFCPUResult* cpu) {
 
     --length;
 
-    char* vendor = NULL;
-    char* model = NULL;
+    char* vendor = nullptr;
+    char* model = nullptr;
 
     for (char* p; length > 0; length = p ? (ssize_t) (p - content) - 1 : 0) {
         p = memrchr(content, '\0', (size_t) length);
@@ -906,7 +997,7 @@ FF_A_UNUSED static void detectSocName(FFCPUResult* cpu) {
     else if (ffStrEquals(vendor, "apple")) {
         // https://elixir.bootlin.com/linux/v6.11/source/arch/arm64/boot/dts/apple
         if (model[0] == 't') {
-            uint32_t deviceId = (uint32_t) strtoul(model + 1, NULL, 10);
+            uint32_t deviceId = (uint32_t) strtoul(model + 1, nullptr, 10);
             ffStrbufSetStatic(&cpu->name, ffCPUAppleCodeToName(deviceId));
 
             if (!cpu->name.length) {
@@ -921,22 +1012,19 @@ FF_A_UNUSED static void detectSocName(FFCPUResult* cpu) {
     }
     #endif
     else if (ffStrEquals(vendor, "qcom")) {
-        // https://elixir.bootlin.com/linux/v6.11/source/arch/arm64/boot/dts/qcom
-        if (ffStrStartsWith(model, "x")) {
-            ffStrbufSetS(&cpu->name, "Qualcomm Snapdragon X Elite ");
-            for (const char* p = model + 1; *p; ++p) {
-                ffStrbufAppendC(&cpu->name, (char) toupper(*p));
+        // https://elixir.bootlin.com/linux/latest/source/arch/arm64/boot/dts/qcom
+        if (!ffCPUQualcommSnapdragonToName(&cpu->name, content)) {
+            if (ffStrStartsWith(model, "sc")) {
+                const char* code = model + 2;
+                uint32_t deviceId = (uint32_t) strtoul(code, nullptr, 10);
+                ffStrbufSetStatic(&cpu->name, ffCPUQualcommCodeToName(deviceId));
+                if (!cpu->name.length) {
+                    ffStrbufAppendS(&cpu->name, "Qualcomm Snapdragon SC");
+                    ffStrbufAppendS(&cpu->name, code);
+                }
+            } else {
+                ffStrbufSetS(&cpu->name, model);
             }
-        } else if (ffStrStartsWith(model, "sc")) {
-            const char* code = model + 2;
-            uint32_t deviceId = (uint32_t) strtoul(code, NULL, 10);
-            ffStrbufSetStatic(&cpu->name, ffCPUQualcommCodeToName(deviceId));
-            if (!cpu->name.length) {
-                ffStrbufAppendS(&cpu->name, "Qualcomm Snapdragon SC");
-                ffStrbufAppendS(&cpu->name, code);
-            }
-        } else {
-            ffStrbufSetS(&cpu->name, model);
         }
 
         ffStrbufSetStatic(&cpu->vendor, "Qualcomm");
@@ -960,7 +1048,7 @@ FF_A_UNUSED static void detectSocName(FFCPUResult* cpu) {
 }
 
     #ifdef __loongarch__
-FF_A_UNUSED static uint16_t getLoongarchPropCount(FFstrbuf* cpuinfo, const char* key) {
+[[maybe_unused]] static uint16_t getLoongarchPropCount(FFstrbuf* cpuinfo, const char* key) {
     const char* p = cpuinfo->chars;
     uint64_t low = 0, high = 0;
     uint32_t keylen = (uint32_t) strlen(key);
@@ -981,7 +1069,7 @@ FF_A_UNUSED static uint16_t getLoongarchPropCount(FFstrbuf* cpuinfo, const char*
 }
     #endif
 
-FF_A_UNUSED static const char* detectCPUOthers(const FFCPUOptions* options, FFCPUResult* cpu) {
+[[maybe_unused]] static const char* detectCPUOthers(const FFCPUOptions* options, FFCPUResult* cpu) {
     cpu->coresLogical = (uint16_t) get_nprocs_conf();
     cpu->coresOnline = (uint16_t) get_nprocs();
 
@@ -1004,7 +1092,7 @@ FF_A_UNUSED static const char* detectCPUOthers(const FFCPUOptions* options, FFCP
         FF_STRBUF_AUTO_DESTROY cpuUarch = ffStrbufCreate();
         FF_STRBUF_AUTO_DESTROY cpuImplementerStr = ffStrbufCreate();
 
-        const char* error = parseCpuInfo(&cpuinfo, cpu, NULL, &cpuMHz, &cpuIsa, &cpuUarch, &cpuImplementerStr);
+        const char* error = parseCpuInfo(&cpuinfo, cpu, nullptr, &cpuMHz, &cpuIsa, &cpuUarch, &cpuImplementerStr);
         if (error) {
             return error;
         }
@@ -1014,7 +1102,7 @@ FF_A_UNUSED static const char* detectCPUOthers(const FFCPUOptions* options, FFCP
         }
 
     #if __arm__ || __aarch64__
-        uint32_t cpuImplementer = (uint32_t) strtoul(cpuImplementerStr.chars, NULL, 16);
+        uint32_t cpuImplementer = (uint32_t) strtoul(cpuImplementerStr.chars, nullptr, 16);
         ffStrbufSetStatic(&cpu->vendor, hwImplId2Vendor(cpuImplementer));
 
         if (cpu->name.length == 0) {
@@ -1047,6 +1135,10 @@ FF_A_UNUSED static const char* detectCPUOthers(const FFCPUOptions* options, FFCP
         if (cpu->name.length) {
             ffStrbufPrependS(&cpu->name, "Machine ");
         }
+    #elif __sparc__ || __sparc
+        // Cpu0ClkTck is in Hz, printed as "%016lx" by sparc64 and "%ld" by sparc32. A 32-bit userland can run
+        // on a 64-bit kernel, so take the base from the width of the value rather than from our own bitness.
+        cpu->frequencyBase = (uint32_t) (strtoull(cpuMHz.chars, nullptr, cpuMHz.length == 16 ? 16 : 10) / 1000000);
     #endif
     }
 
@@ -1057,7 +1149,7 @@ FF_A_UNUSED static const char* detectCPUOthers(const FFCPUOptions* options, FFCP
     ffCPUDetectByCpuid(cpu);
     detectNumaNodes(cpu);
 
-    return NULL;
+    return nullptr;
 }
 #endif
 

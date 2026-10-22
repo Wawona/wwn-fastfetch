@@ -1,4 +1,5 @@
 #include "gamepad.h"
+#include "common/debug.h"
 #include "common/io.h"
 #include "common/strutil.h"
 
@@ -20,7 +21,7 @@ static void detectGamepad(FFlist* devices, FFstrbuf* name, FFstrbuf* path) {
     FF_AUTO_CLOSE_DIR DIR* dirp = opendir(path->chars);
     if (dirp) {
         struct dirent* entry;
-        while ((entry = readdir(dirp)) != NULL) {
+        while ((entry = readdir(dirp)) != nullptr) {
             if (entry->d_name[0] == '.' || (entry->d_type != DT_DIR && entry->d_type != DT_UNKNOWN)) {
                 continue;
             }
@@ -31,7 +32,7 @@ static void detectGamepad(FFlist* devices, FFstrbuf* name, FFstrbuf* path) {
             if (nRead > 0) // Tested with a PS4 controller
             {
                 capacity[nRead] = '\0';
-                device->battery = (uint8_t) strtoul(capacity, NULL, 10);
+                device->battery = (uint8_t) strtoul(capacity, nullptr, 10);
                 break;
             }
 
@@ -64,15 +65,16 @@ static void detectGamepad(FFlist* devices, FFstrbuf* name, FFstrbuf* path) {
 
 const char* ffDetectGamepad(FFlist* devices /* List of FFGamepadDevice */) {
     FF_AUTO_CLOSE_DIR DIR* dirp = opendir("/sys/class/input/");
-    if (dirp == NULL) {
-        return "opendir(\"/sys/class/input/\") == NULL";
+    if (dirp == nullptr) {
+        FF_DEBUG("opendir(\"/sys/class/input/\") failed: %s", strerror(errno));
+        return "opendir(\"/sys/class/input/\") == nullptr";
     }
 
     FF_STRBUF_AUTO_DESTROY path = ffStrbufCreateS("/sys/class/input/");
     uint32_t baseLen = path.length;
 
     struct dirent* entry;
-    while ((entry = readdir(dirp)) != NULL) {
+    while ((entry = readdir(dirp)) != nullptr) {
         if (!ffStrStartsWith(entry->d_name, "js")) {
             continue;
         }
@@ -93,5 +95,5 @@ const char* ffDetectGamepad(FFlist* devices /* List of FFGamepadDevice */) {
         ffStrbufSubstrBefore(&path, baseLen);
     }
 
-    return NULL;
+    return nullptr;
 }

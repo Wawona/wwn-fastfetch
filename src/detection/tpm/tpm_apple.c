@@ -1,4 +1,5 @@
 #include "tpm.h"
+#include "common/debug.h"
 
 #ifndef __aarch64__
     #include "common/apple/cf_helpers.h"
@@ -10,7 +11,7 @@ const char* ffDetectTPM(FFTPMResult* result) {
 
     ffStrbufSetStatic(&result->version, "2.0");
     ffStrbufSetStatic(&result->description, "Apple Silicon Security");
-    return NULL;
+    return nullptr;
 
 #else
 
@@ -21,10 +22,11 @@ const char* ffDetectTPM(FFTPMResult* result) {
     if (t2Service) {
         ffStrbufSetStatic(&result->version, "2.0");
         ffStrbufSetStatic(&result->description, "Apple T2 Security Chip");
-        return NULL;
+        return nullptr;
     }
 
 #endif
 
+    FF_DEBUG("Neither Apple T2 nor Apple Silicon Security was reported by IOKit");
     return "No Apple Security hardware detected";
 }

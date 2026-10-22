@@ -1,10 +1,12 @@
 #include "board.h"
 
+#include "common/debug.h"
 #include "common/apple/cf_helpers.h"
 
 const char* ffDetectBoard(FFBoardResult* result) {
     FF_IOOBJECT_AUTO_RELEASE io_registry_entry_t service = IOServiceGetMatchingService(MACH_PORT_NULL, IOServiceMatching("IOPlatformExpertDevice"));
     if (!service) {
+        FF_DEBUG("No IOPlatformExpertDevice found");
         return "No IOPlatformExpertDevice found";
     }
 
@@ -28,5 +30,5 @@ const char* ffDetectBoard(FFBoardResult* result) {
         ffCfStrGetString(manufacturer, &result->vendor);
     }
 
-    return NULL;
+    return nullptr;
 }

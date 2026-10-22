@@ -8,8 +8,6 @@
 
 #pragma GCC diagnostic ignored "-Wformat" // warning: unknown conversion type character 'F' in format
 
-#define FF_DATETIME_DISPLAY_NAME "Date & Time"
-
 typedef struct FFDateTimeResult {
     // Examples for 21.02.2022 - 15:18:37
     uint16_t year;                                       // 2022
@@ -50,13 +48,13 @@ static void printDateTimeFormat(struct tm* tm, const FFModuleArgs* moduleArgs) {
     result.week = (uint8_t) (tm->tm_yday / 7 + 1);
     strftime(result.weekday, sizeof(result.weekday), "%A", tm);
     strftime(result.weekdayShort, sizeof(result.weekdayShort), "%a", tm);
-    result.dayInYear = (uint8_t) (tm->tm_yday + 1);
+    result.dayInYear = (uint16_t) (tm->tm_yday + 1);
     result.dayInMonth = (uint8_t) tm->tm_mday;
     result.dayInWeek = tm->tm_wday == 0 ? 7 : (uint8_t) tm->tm_wday;
     strftime(result.dayPretty, sizeof(result.dayPretty), "%d", tm);
     result.hour = (uint8_t) tm->tm_hour;
     strftime(result.hourPretty, sizeof(result.hourPretty), "%H", tm);
-    result.hour12 = (uint8_t) (result.hour % 12);
+    result.hour12 = (uint8_t) (result.hour % 12 ?: 12);
     strftime(result.hour12Pretty, sizeof(result.hour12Pretty), "%I", tm);
     result.minute = (uint8_t) tm->tm_min;
     strftime(result.minutePretty, sizeof(result.minutePretty), "%M", tm);
@@ -67,7 +65,7 @@ static void printDateTimeFormat(struct tm* tm, const FFModuleArgs* moduleArgs) {
     strftime(result.amPm, sizeof(result.amPm), "%p", tm);
 
     FF_PRINT_FORMAT_CHECKED(
-        FF_DATETIME_DISPLAY_NAME,
+        FF_MODULE_GET_DISPLAY_NAME(DateTime),
         0,
         moduleArgs,
         FF_PRINT_TYPE_DEFAULT,
@@ -112,11 +110,11 @@ bool ffPrintDateTime(FFDateTimeOptions* options) {
     char buffer[32];
     if (strftime(buffer, ARRAY_SIZE(buffer), "%F %T", tm) == 0) // yyyy-MM-dd HH:mm:ss
     {
-        ffPrintError(FF_DATETIME_DISPLAY_NAME, 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "strftime() failed");
+        ffPrintError(FF_MODULE_GET_DISPLAY_NAME(DateTime), 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "strftime() failed");
         return false;
     }
 
-    ffPrintLogoAndKey(FF_DATETIME_DISPLAY_NAME, 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT);
+    ffPrintLogoAndKey(FF_MODULE_GET_DISPLAY_NAME(DateTime), 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT);
 
     puts(buffer);
     return true;
@@ -130,15 +128,16 @@ void ffParseDateTimeJsonObject(FFDateTimeOptions* options, yyjson_val* module) {
             continue;
         }
 
-        ffPrintError(FF_DATETIME_DISPLAY_NAME, 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "Unknown JSON key %s", unsafe_yyjson_get_str(key));
+        ffPrintError(FF_MODULE_GET_DISPLAY_NAME(DateTime), 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "Unknown JSON key %s", unsafe_yyjson_get_str(key));
     }
 }
 
+[[gnu::cold]]
 void ffGenerateDateTimeJsonConfig(FFDateTimeOptions* options, yyjson_mut_doc* doc, yyjson_mut_val* module) {
     ffJsonConfigGenerateModuleArgsConfig(doc, module, &options->moduleArgs);
 }
 
-bool ffGenerateDateTimeJsonResult(FF_A_UNUSED FFDateTimeOptions* options, yyjson_mut_doc* doc, yyjson_mut_val* module) {
+bool ffGenerateDateTimeJsonResult([[maybe_unused]] FFDateTimeOptions* options, yyjson_mut_doc* doc, yyjson_mut_val* module) {
     yyjson_mut_obj_add_strcpy(doc, module, "result", ffTimeToFullStr(ffTimeGetNow()));
     return true;
 }
@@ -152,8 +151,31 @@ void ffDestroyDateTimeOptions(FFDateTimeOptions* options) {
 }
 
 FFModuleBaseInfo ffDateTimeModuleInfo = {
-    .name = FF_DATETIME_MODULE_NAME,
+    .name = "DateTime",
     .description = "Print the current date and time",
+    .displayName = {
+        .en = "Date & Time",
+        .ar = "التاريخ والوقت",
+        .cs = "Datum a čas",
+        .de = "Datum & Uhrzeit",
+        .es = "Fecha y hora",
+        .fi = "Päivämäärä ja kellonaika",
+        .fr = "Date et heure",
+        .gl = "Data e hora",
+        .he = "תאריך ושעה",
+        .id = "Tanggal & Waktu",
+        .it = "Data e ora",
+        .ja = "日付と時刻",
+        .ko = "날짜/시간",
+        .pl = "Data i godzina",
+        .pt = "Data e hora",
+        .ru = "Дата и время",
+        .tr = "Tarih ve Saat",
+        .uk = "Дата й час",
+        .vi = "Ngày giờ",
+        .zh_CN = "日期时间",
+        .zh_TW = "日期時間",
+    },
     .initOptions = (void*) ffInitDateTimeOptions,
     .destroyOptions = (void*) ffDestroyDateTimeOptions,
     .parseJsonObject = (void*) ffParseDateTimeJsonObject,
@@ -185,5 +207,6 @@ FFModuleBaseInfo ffDateTimeModuleInfo = {
         { "Locale-dependent timezone name or abbreviation", "timezone-name" },
         { "Day in month with leading zero", "day-pretty" },
         { "AM or PM", "am-pm" },
-    }))
+    })),
+    .defaultOrder = 53,
 };

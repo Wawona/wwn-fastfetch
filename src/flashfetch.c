@@ -5,7 +5,7 @@
 #include "modules/modules.h"
 
 #define MODULE_OPTION(name)                                           \
-    FF_A_CLEANUP(ffDestroy##name##Options) FF##name##Options options; \
+    [[gnu::cleanup(ffDestroy##name##Options)]] FF##name##Options options; \
     ffInit##name##Options(&options);
 
 // A dirty replicate of neofetch; demonstration only.
@@ -68,11 +68,13 @@ int main(void) {
     }
     {
         MODULE_OPTION(DE)
+        ffStrbufSetStatic(&options.moduleArgs.key, "DE");
         ffPrintDE(&options);
     }
     {
         instance.config.general.detectVersion = false;
         MODULE_OPTION(WM)
+        ffStrbufSetStatic(&options.moduleArgs.key, "WM");
         options.detectPlugin = true;
         ffPrintWM(&options);
         instance.config.general.detectVersion = true;
@@ -100,6 +102,7 @@ int main(void) {
     }
     {
         MODULE_OPTION(CPU)
+        options.showPeCoreCount = false;
         ffPrintCPU(&options);
     }
     {

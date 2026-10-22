@@ -15,13 +15,15 @@
 static void printDisk(FFDiskOptions* options, const FFDisk* disk, uint32_t index) {
     FF_STRBUF_AUTO_DESTROY key = ffStrbufCreate();
 
+    uint64_t bytesUsed = disk->bytesTotal - disk->bytesFree;
+
     if (options->moduleArgs.key.length == 0) {
-        ffStrbufSetF(&key, "%s (%s)", FF_DISK_MODULE_NAME, disk->mountpoint.chars);
+        ffStrbufSetF(&key, "%s (%s)", FF_MODULE_GET_DISPLAY_NAME(Disk), disk->mountpoint.chars);
     } else {
         FF_STRBUF_AUTO_DESTROY mountpointLink = ffStrbufCreate();
         FF_STRBUF_AUTO_DESTROY nameLink = ffStrbufCreate();
 #ifdef __linux__
-        if (getenv("WSL_DISTRO_NAME") != NULL && getenv("WT_SESSION") != NULL) {
+        if (getenv("WSL_DISTRO_NAME") != nullptr && getenv("WT_SESSION") != nullptr) {
             if (ffStrbufEqualS(&disk->filesystem, "9p") && ffStrbufStartsWithS(&disk->mountpoint, "/mnt/")) {
                 ffStrbufSetF(&mountpointLink, "\e]8;;file:///%c:/\e\\%s\e]8;;\e\\", disk->mountpoint.chars[5], disk->mountpoint.chars);
                 ffStrbufSetF(&nameLink, "\e]8;;file:///%c:/\e\\%s\e]8;;\e\\", disk->mountpoint.chars[5], disk->name.chars);
@@ -45,16 +47,17 @@ static void printDisk(FFDiskOptions* options, const FFDisk* disk, uint32_t index
                                                                            FF_ARG(disk->filesystem, "filesystem"),
                                                                            FF_ARG(mountpointLink, "mountpoint-link"),
                                                                            FF_ARG(nameLink, "name-link"),
+                                                                           FF_ARG(FF_MODULE_GET_DISPLAY_NAME(Disk), "module-name"),
                                                                        }));
     }
 
     FF_STRBUF_AUTO_DESTROY usedPretty = ffStrbufCreate();
-    ffSizeAppendNum(disk->bytesUsed, &usedPretty);
+    ffSizeAppendNum(bytesUsed, &usedPretty);
 
     FF_STRBUF_AUTO_DESTROY totalPretty = ffStrbufCreate();
     ffSizeAppendNum(disk->bytesTotal, &totalPretty);
 
-    double bytesPercentage = disk->bytesTotal > 0 ? (double) disk->bytesUsed / (double) disk->bytesTotal * 100.0 : 0;
+    double bytesPercentage = disk->bytesTotal > 0 ? (double) bytesUsed / (double) disk->bytesTotal * 100.0 : 0;
     FFPercentageTypeFlags percentType = options->percent.type == 0 ? instance.config.display.percentType : options->percent.type;
 
     if (options->moduleArgs.outputFormat.length == 0) {
@@ -135,9 +138,6 @@ static void printDisk(FFDiskOptions* options, const FFDisk* disk, uint32_t index
         FF_STRBUF_AUTO_DESTROY freePretty = ffStrbufCreate();
         ffSizeAppendNum(disk->bytesFree, &freePretty);
 
-        FF_STRBUF_AUTO_DESTROY availPretty = ffStrbufCreate();
-        ffSizeAppendNum(disk->bytesAvailable, &availPretty);
-
         uint64_t now = ffTimeGetNow();
         uint64_t duration = now - disk->createTime;
         uint32_t milliseconds = (uint32_t) (duration % 1000);
@@ -177,7 +177,8 @@ static void printDisk(FFDiskOptions* options, const FFDisk* disk, uint32_t index
                                                                                                      FF_ARG(age.daysOfYear, "days-of-year"),
                                                                                                      FF_ARG(age.yearsFraction, "years-fraction"),
                                                                                                      FF_ARG(freePretty, "size-free"),
-                                                                                                     FF_ARG(availPretty, "size-available"),
+                                                                                                     FF_ARG(bytesUsed, "bytes-used"),
+                                                                                                     FF_ARG(disk->bytesTotal, "bytes-total"),
                                                                                                  }));
     }
 }
@@ -187,12 +188,12 @@ bool ffPrintDisk(FFDiskOptions* options) {
     const char* error = ffDetectDisks(options, &disks);
 
     if (error) {
-        ffPrintError(FF_DISK_MODULE_NAME, 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "%s", error);
+        ffPrintError(FF_MODULE_GET_DISPLAY_NAME(Disk), 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "%s", error);
         return false;
     }
 
     if (disks.length == 0) {
-        ffPrintError(FF_DISK_MODULE_NAME, 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "No disks found");
+        ffPrintError(FF_MODULE_GET_DISPLAY_NAME(Disk), 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "No disks found");
         return false;
     }
 
@@ -327,10 +328,11 @@ void ffParseDiskJsonObject(FFDiskOptions* options, yyjson_val* module) {
             continue;
         }
 
-        ffPrintError(FF_DISK_MODULE_NAME, 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "Unknown JSON key %s", unsafe_yyjson_get_str(key));
+        ffPrintError(FF_MODULE_GET_DISPLAY_NAME(Disk), 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "Unknown JSON key %s", unsafe_yyjson_get_str(key));
     }
 }
 
+[[gnu::cold]]
 void ffGenerateDiskJsonConfig(FFDiskOptions* options, yyjson_mut_doc* doc, yyjson_mut_val* module) {
     ffJsonConfigGenerateModuleArgsConfig(doc, module, &options->moduleArgs);
 
@@ -372,10 +374,8 @@ bool ffGenerateDiskJsonResult(FFDiskOptions* options, yyjson_mut_doc* doc, yyjso
         yyjson_mut_val* obj = yyjson_mut_arr_add_obj(doc, arr);
 
         yyjson_mut_val* bytes = yyjson_mut_obj_add_obj(doc, obj, "bytes");
-        yyjson_mut_obj_add_uint(doc, bytes, "available", item->bytesAvailable);
         yyjson_mut_obj_add_uint(doc, bytes, "free", item->bytesFree);
         yyjson_mut_obj_add_uint(doc, bytes, "total", item->bytesTotal);
-        yyjson_mut_obj_add_uint(doc, bytes, "used", item->bytesUsed);
 
         yyjson_mut_val* files = yyjson_mut_obj_add_obj(doc, obj, "files");
         if (item->filesTotal == 0 && item->filesUsed == 0) {
@@ -434,6 +434,8 @@ void ffInitDiskOptions(FFDiskOptions* options) {
     ffStrbufInit(&options->folders);
 #if _WIN32 || __APPLE__ || __ANDROID__
     ffStrbufInit(&options->hideFolders);
+#elif __HAIKU__
+    ffStrbufInitS(&options->hideFolders, "/esp"); // /boot on haiku is the system volume
 #else
     ffStrbufInitS(&options->hideFolders, "/efi:/boot:/boot/*");
 #endif
@@ -451,8 +453,31 @@ void ffDestroyDiskOptions(FFDiskOptions* options) {
 }
 
 FFModuleBaseInfo ffDiskModuleInfo = {
-    .name = FF_DISK_MODULE_NAME,
+    .name = "Disk",
     .description = "Print partitions, space usage, file system, etc",
+    .displayName = {
+        .en = "Disk",
+        .ar = "القرص",
+        .cs = "Disk",
+        .de = "Festplatte",
+        .es = "Disco",
+        .fi = "Levy",
+        .fr = "Disque",
+        .gl = "Disco",
+        .he = "דיסק",
+        .id = "Disk",
+        .it = "Disco",
+        .ja = "ディスク",
+        .ko = "디스크",
+        .pl = "Dysk",
+        .pt = "Disco",
+        .ru = "Диск",
+        .tr = "Disk",
+        .uk = "Диск",
+        .vi = "Ổ đĩa",
+        .zh_CN = "磁盘分区",
+        .zh_TW = "硬碟分割",
+    },
     .initOptions = (void*) ffInitDiskOptions,
     .destroyOptions = (void*) ffDestroyDiskOptions,
     .parseJsonObject = (void*) ffParseDiskJsonObject,
@@ -460,16 +485,16 @@ FFModuleBaseInfo ffDiskModuleInfo = {
     .generateJsonResult = (void*) ffGenerateDiskJsonResult,
     .generateJsonConfig = (void*) ffGenerateDiskJsonConfig,
     .formatArgs = FF_FORMAT_ARG_LIST(((FFModuleFormatArg[]) {
-        { "Size used", "size-used" },
-        { "Size total", "size-total" },
+        { "Size used (formatted)", "size-used" },
+        { "Size total (formatted)", "size-total" },
         { "Size percentage num", "size-percentage" },
         { "Files used", "files-used" },
         { "Files total", "files-total" },
         { "Files percentage num", "files-percentage" },
         { "True if external volume", "is-external" },
         { "True if hidden volume", "is-hidden" },
-        { "Filesystem", "filesystem" },
-        { "Label / name", "name" },
+        { "Filesystem *", "filesystem" },
+        { "Label / name *", "name" },
         { "True if read-only", "is-readonly" },
         { "Create time in local timezone", "create-time" },
         { "Size percentage bar", "size-percentage-bar" },
@@ -479,12 +504,14 @@ FFModuleBaseInfo ffDiskModuleInfo = {
         { "Minutes after creation", "minutes" },
         { "Seconds after creation", "seconds" },
         { "Milliseconds after creation", "milliseconds" },
-        { "Mount point / drive letter", "mountpoint" },
-        { "Mount from (device path)", "mount-from" },
+        { "Mount point / drive letter *", "mountpoint" },
+        { "Mount from (device path) *", "mount-from" },
         { "Years integer after creation", "years" },
         { "Days of year after creation", "days-of-year" },
         { "Years fraction after creation", "years-fraction" },
-        { "Size free", "size-free" },
-        { "Size available", "size-available" },
-    }))
+        { "Size free (formatted)", "size-free" },
+        { "Size used (in bytes)", "bytes-used" },
+        { "Size total (in bytes)", "bytes-total" },
+    })),
+    .defaultOrder = 42,
 };

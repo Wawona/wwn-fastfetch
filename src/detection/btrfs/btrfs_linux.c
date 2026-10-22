@@ -1,5 +1,6 @@
 #include "btrfs.h"
 
+#include "common/debug.h"
 #include "common/io.h"
 #include <fcntl.h>
 
@@ -8,17 +9,19 @@ enum { uuidLen = (uint32_t) __builtin_strlen("00000000-0000-0000-0000-0000000000
 static const char* enumerateDevices(FFBtrfsResult* item, int dfd, FFstrbuf* buffer) {
     int subfd = openat(dfd, "devices", O_RDONLY | O_CLOEXEC | O_DIRECTORY);
     if (subfd < 0) {
+        FF_DEBUG("openat(\"devices\") failed: %s", strerror(errno));
         return "openat(\"/sys/fs/btrfs/UUID/devices\") == -1";
     }
 
     FF_AUTO_CLOSE_DIR DIR* dirp = fdopendir(subfd);
-    if (dirp == NULL) {
+    if (dirp == nullptr) {
+        FF_DEBUG("fdopendir(\"devices\") failed: %s", strerror(errno));
         close(subfd);
-        return "fdopendir(\"/sys/fs/btrfs/UUID/devices\") == NULL";
+        return "fdopendir(\"/sys/fs/btrfs/UUID/devices\") == nullptr";
     }
 
     struct dirent* entry;
-    while ((entry = readdir(dirp)) != NULL) {
+    while ((entry = readdir(dirp)) != nullptr) {
         if (entry->d_name[0] == '.') {
             continue;
         }
@@ -36,22 +39,24 @@ static const char* enumerateDevices(FFBtrfsResult* item, int dfd, FFstrbuf* buff
         }
     }
 
-    return NULL;
+    return nullptr;
 }
 
 static const char* enumerateFeatures(FFBtrfsResult* item, int dfd) {
     int subfd = openat(dfd, "features", O_RDONLY | O_CLOEXEC | O_DIRECTORY);
     if (subfd < 0) {
+        FF_DEBUG("openat(\"features\") failed: %s", strerror(errno));
         return "openat(\"/sys/fs/btrfs/UUID/features\") == -1";
     }
 
     FF_AUTO_CLOSE_DIR DIR* dirp = fdopendir(subfd);
-    if (dirp == NULL) {
-        return "fdopendir(\"/sys/fs/btrfs/UUID/features\") == NULL";
+    if (dirp == nullptr) {
+        FF_DEBUG("fdopendir(\"features\") failed: %s", strerror(errno));
+        return "fdopendir(\"/sys/fs/btrfs/UUID/features\") == nullptr";
     }
 
     struct dirent* entry;
-    while ((entry = readdir(dirp)) != NULL) {
+    while ((entry = readdir(dirp)) != nullptr) {
         if (entry->d_name[0] == '.') {
             continue;
         }
@@ -61,25 +66,27 @@ static const char* enumerateFeatures(FFBtrfsResult* item, int dfd) {
         ffStrbufAppendS(&item->features, entry->d_name);
     }
 
-    return NULL;
+    return nullptr;
 }
 
 static const char* detectAllocation(FFBtrfsResult* item, int dfd, FFstrbuf* buffer) {
     FF_AUTO_CLOSE_FD int subfd = openat(dfd, "allocation", O_RDONLY | O_CLOEXEC | O_PATH | O_DIRECTORY);
     if (subfd < 0) {
+        FF_DEBUG("openat(\"allocation\") failed: %s", strerror(errno));
         return "openat(\"/sys/fs/btrfs/UUID/allocation\") == -1";
     }
 
     if (ffReadFileBufferRelative(subfd, "global_rsv_size", buffer)) {
         item->globalReservationTotal = ffStrbufToUInt(buffer, 0);
     } else {
-        return "ffReadFileBuffer(\"/sys/fs/btrfs/UUID/allocation/global_rsv_size\") == NULL";
+        FF_DEBUG("ffReadFileBuffer(\"global_rsv_size\") failed");
+        return "ffReadFileBuffer(\"/sys/fs/btrfs/UUID/allocation/global_rsv_size\") == nullptr";
     }
 
     if (ffReadFileBufferRelative(subfd, "global_rsv_reserved", buffer)) {
+        // global_rsv_reserved is already the used part of the reservation, global_rsv_size its total
         item->globalReservationUsed = ffStrbufToUInt(buffer, 0);
     }
-    item->globalReservationUsed = item->globalReservationTotal - item->globalReservationUsed;
 
 #define FF_BTRFS_DETECT_PROFILE(_index, _type, _profile, _copies)      \
     else if (faccessat(subfd, _type "/" _profile "/", F_OK, 0) == 0) { \
@@ -118,19 +125,20 @@ static const char* detectAllocation(FFBtrfsResult* item, int dfd, FFstrbuf* buff
 
 #undef FF_BTRFS_DETECT_TYPE
 
-    return NULL;
+    return nullptr;
 }
 
 const char* ffDetectBtrfs(FFlist* result) {
     FF_AUTO_CLOSE_DIR DIR* dirp = opendir("/sys/fs/btrfs/");
-    if (dirp == NULL) {
-        return "opendir(\"/sys/fs/btrfs\") == NULL";
+    if (dirp == nullptr) {
+        FF_DEBUG("opendir(\"/sys/fs/btrfs\") failed: %s", strerror(errno));
+        return "opendir(\"/sys/fs/btrfs\") == nullptr";
     }
 
     FF_STRBUF_AUTO_DESTROY buffer = ffStrbufCreate();
 
     struct dirent* entry;
-    while ((entry = readdir(dirp)) != NULL) {
+    while ((entry = readdir(dirp)) != nullptr) {
         if (entry->d_name[0] == '.') {
             continue;
         }
@@ -174,5 +182,5 @@ const char* ffDetectBtrfs(FFlist* result) {
         detectAllocation(item, dfd, &buffer);
     }
 
-    return NULL;
+    return nullptr;
 }

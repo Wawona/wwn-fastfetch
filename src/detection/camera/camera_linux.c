@@ -1,8 +1,10 @@
 #include "camera.h"
+#include "common/debug.h"
 #include "common/io.h"
 
 #include <unistd.h>
 #include <fcntl.h>
+#include <string.h>
 #include <sys/ioctl.h>
 
 #if FF_HAVE_LINUX_VIDEODEV2
@@ -26,6 +28,7 @@ const char* ffDetectCamera(FFlist* result) {
             if (errno == ENXIO) {
                 continue;
             }
+            FF_DEBUG("Failed to open /dev/videoN: %s", strerror(errno));
             return "Failed to open /dev/videoN";
         }
 
@@ -86,7 +89,7 @@ const char* ffDetectCamera(FFlist* result) {
         camera->height = fmt.fmt.pix.height;
     }
 
-    return NULL;
+    return nullptr;
 #else
     FF_UNUSED(result);
     return "Fastfetch was compiled without <linux/videodev2.h>";

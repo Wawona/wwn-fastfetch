@@ -1,4 +1,5 @@
 #include "gpu.h"
+#include "common/debug.h"
 #include "common/io.h"
 
 #include <sys/param.h>
@@ -26,7 +27,7 @@ static inline int pciReadConf(int fd, uint32_t bus, uint32_t device, uint32_t fu
     return 0;
 }
 
-const char* ffDetectGPUImpl(FF_A_UNUSED const FFGPUOptions* options, FFlist* gpus) {
+const char* ffDetectGPUImpl([[maybe_unused]] const FFGPUOptions* options, FFlist* gpus) {
     char pciDevPath[] = "/dev/pciXXX";
 
     for (uint32_t idev = 0; idev <= 255; idev++) {
@@ -37,6 +38,7 @@ const char* ffDetectGPUImpl(FF_A_UNUSED const FFGPUOptions* options, FFlist* gpu
             if (errno == ENOENT) {
                 break; // No more /dev/pciN devices
             }
+            FF_DEBUG("open(\"%s\", O_RDONLY | O_CLOEXEC) failed: %s", pciDevPath, strerror(errno));
             return "open(\"/dev/pciN\", O_RDONLY | O_CLOEXEC) failed";
         }
 
@@ -117,5 +119,5 @@ const char* ffDetectGPUImpl(FF_A_UNUSED const FFGPUOptions* options, FFlist* gpu
         }
     }
 
-    return NULL;
+    return nullptr;
 }

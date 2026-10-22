@@ -1,12 +1,17 @@
 #include "swap.h"
 
+#include "common/debug.h"
 #include "common/sysctl.h"
+
+#include <errno.h>
+#include <string.h>
 #include <mach/mach.h>
 
 const char* ffDetectSwap(FFlist* result) {
     struct xsw_usage xsw;
     size_t size = sizeof(xsw);
-    if (sysctl((int[]) { CTL_VM, VM_SWAPUSAGE }, 2, &xsw, &size, NULL, 0) != 0) {
+    if (sysctl((int[]) { CTL_VM, VM_SWAPUSAGE }, 2, &xsw, &size, nullptr, 0) != 0) {
+        FF_DEBUG("sysctl(vm.swapusage) failed: %s", strerror(errno));
         return "Failed to read vm.swapusage";
     }
 
@@ -15,7 +20,7 @@ const char* ffDetectSwap(FFlist* result) {
             // "vm.compressor_mode" no longer exists in macOS 26.0
         } else {
             if (ffSysctlGetInt("vm.compressor_mode", 4) <= 2) {
-                return NULL; // Swap is disabled
+                return nullptr; // Swap is disabled
             }
         }
     }
@@ -24,5 +29,5 @@ const char* ffDetectSwap(FFlist* result) {
     ffStrbufInitStatic(&swap->name, xsw.xsu_encrypted ? "Encrypted" : "Normal");
     swap->bytesTotal = xsw.xsu_total;
     swap->bytesUsed = xsw.xsu_used;
-    return NULL;
+    return nullptr;
 }

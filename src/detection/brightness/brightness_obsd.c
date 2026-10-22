@@ -1,4 +1,5 @@
 #include "brightness.h"
+#include "common/debug.h"
 #include "common/io.h"
 
 #include <dev/wscons/wsconsio.h>
@@ -6,7 +7,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 
-const char* ffDetectBrightness(FF_A_UNUSED FFBrightnessOptions* options, FFlist* result) {
+const char* ffDetectBrightness([[maybe_unused]] FFBrightnessOptions* options, FFlist* result) {
     char path[] = "/dev/ttyCX";
     for (char i = '0'; i <= '9'; ++i) {
         path[strlen("/dev/ttyC")] = i;
@@ -15,6 +16,7 @@ const char* ffDetectBrightness(FF_A_UNUSED FFBrightnessOptions* options, FFlist*
 
         if (devfd < 0) {
             if (errno == EACCES && i == '0') {
+                FF_DEBUG("open(%s) failed: %s", path, strerror(errno));
                 return "Permission denied when opening tty device";
             }
             if (errno == ENOENT) {
@@ -40,5 +42,5 @@ const char* ffDetectBrightness(FF_A_UNUSED FFBrightnessOptions* options, FFlist*
         brightness->builtin = true;
     }
 
-    return NULL;
+    return nullptr;
 }

@@ -2,7 +2,7 @@
 
 #include "common/ffdata.h"
 
-typedef enum FF_A_PACKED FFDsForceDrmType {
+typedef enum FFDsForceDrmType: uint8_t {
     FF_DS_FORCE_DRM_TYPE_FALSE = 0,  // Disable
     FF_DS_FORCE_DRM_TYPE_TRUE = 1,   // Try `libdrm`, then `sysfs` if libdrm failed
     FF_DS_FORCE_DRM_TYPE_SYSFS_ONLY, // Use `/sys/class/drm` only
@@ -20,7 +20,7 @@ typedef struct FFOptionsGeneral {
 #endif
 } FFOptionsGeneral;
 
-const char* ffOptionsParseGeneralJsonConfig(FFOptionsGeneral* options, yyjson_val* root);
+const char* ffOptionsParseGeneralJsonConfig(FFOptionsGeneral* options, yyjson_val* root, yyjson_val** pkey);
 bool ffOptionsParseGeneralCommandLine(FFOptionsGeneral* options, const char* key, const char* value);
 void ffOptionsInitGeneral(FFOptionsGeneral* options);
 void ffOptionsDestroyGeneral(FFOptionsGeneral* options);

@@ -81,7 +81,7 @@ static bool parseMprisMetadata(FFDBusData* data, DBusMessageIter* rootIterator, 
                                 break;
                             }
                             char str[] = { path.chars[i + 1], path.chars[i + 2], 0 };
-                            char* end = NULL;
+                            char* end = nullptr;
                             const char decodedChar = (char) strtoul(str, &end, 16);
                             if (end == &str[2]) {
                                 i += 2;
@@ -111,7 +111,7 @@ static bool parseMprisMetadata(FFDBusData* data, DBusMessageIter* rootIterator, 
 static bool getBusProperties(FFDBusData* data, const char* busName, FFMediaResult* result) {
     // Get all properties at once to reduce the number of IPCs
     DBusMessage* reply = ffDBusGetAllProperties(data, busName, "/org/mpris/MediaPlayer2", "org.mpris.MediaPlayer2.Player");
-    if (reply == NULL) {
+    if (reply == nullptr) {
         return false;
     }
 
@@ -166,7 +166,7 @@ static bool getBusProperties(FFDBusData* data, const char* busName, FFMediaResul
                         break;
                     }
                     char str[] = { fileName[1], fileName[2], 0 };
-                    ffStrbufAppendC(&result->song, (char) strtoul(str, NULL, 16));
+                    ffStrbufAppendC(&result->song, (char) strtoul(str, nullptr, 16));
                     fileName += 2;
                 }
             }
@@ -221,8 +221,8 @@ static void getBestBus(FFDBusData* data, FFMediaResult* result) {
         return;
     }
 
-    DBusMessage* reply = ffDBusGetMethodReply(data, "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "ListNames", NULL, NULL);
-    if (reply == NULL) {
+    DBusMessage* reply = ffDBusGetMethodReply(data, "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "ListNames", nullptr, nullptr);
+    if (reply == nullptr) {
         return;
     }
 
@@ -260,7 +260,7 @@ static void getBestBus(FFDBusData* data, FFMediaResult* result) {
 static const char* getMedia(FFMediaResult* result) {
     FF_DBUS_AUTO_DESTROY_DATA FFDBusData data = {};
     const char* error = ffDBusLoadData(DBUS_BUS_SESSION, &data);
-    if (error != NULL) {
+    if (error != nullptr) {
         return error;
     }
 
@@ -272,12 +272,22 @@ static const char* getMedia(FFMediaResult* result) {
         getBestBus(&data, result);
     }
 
-    return NULL;
+    return nullptr;
 }
 
 #endif
 
-void ffDetectMediaImpl(FFMediaResult* media, bool saveCover) {
+// Android compiles this file next to media_android.c, which owns ffDetectMediaImpl and calls this one
+// when the media_session service has nothing to say -- an app UID is refused by that service, while the
+// session bus a desktop environment brings up is open to every process in it. Same arrangement as
+// wallpaper_linux.c and terminalfont_linux.c.
+void
+#ifdef __ANDROID__
+ffDetectMediaLinuxImpl
+#else
+ffDetectMediaImpl
+#endif
+    (FFMediaResult* media, bool saveCover) {
     FF_UNUSED(saveCover); // We don't save the cover to a file for Mpris implementation
 #ifdef FF_HAVE_DBUS
     const char* error = getMedia(media);

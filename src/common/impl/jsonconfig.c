@@ -1,5 +1,6 @@
 #include "fastfetch.h"
 #include "common/color.h"
+#include "common/debug.h"
 #include "common/jsonconfig.h"
 #include "common/printing.h"
 #include "common/io.h"
@@ -60,6 +61,22 @@ void ffJsonConfigGenerateModuleArgsConfig(yyjson_mut_doc* doc, yyjson_mut_val* m
     }
 }
 
+bool ffJsonConfigParseUInt32(yyjson_val* val, uint32_t* result, uint32_t max) {
+    if (!yyjson_is_int(val)) {
+        return false;
+    }
+
+    // `yyjson_get_sint()` is exact for every value that fits into `int64_t`, and is negative for the
+    // `uint64_t` values above `INT64_MAX`, which no caller accepts anyway.
+    int64_t num = unsafe_yyjson_get_sint(val);
+    if (num < 0 || (uint64_t) num > max) {
+        return false;
+    }
+
+    *result = (uint32_t) num;
+    return true;
+}
+
 const char* ffJsonConfigParseEnum(yyjson_val* val, int* result, FFKeyValuePair pairs[]) {
     if (yyjson_is_int(val)) {
         int intVal = yyjson_get_int(val);
@@ -67,22 +84,26 @@ const char* ffJsonConfigParseEnum(yyjson_val* val, int* result, FFKeyValuePair p
         for (const FFKeyValuePair* pPair = pairs; pPair->key; ++pPair) {
             if (intVal == pPair->value) {
                 *result = pPair->value;
-                return NULL;
+                return nullptr;
             }
         }
 
+        FF_DEBUG("The enum value %d is not one of the accepted integers", intVal);
         return "Invalid enum integer";
     } else if (yyjson_is_str(val)) {
         const char* strVal = yyjson_get_str(val);
         for (const FFKeyValuePair* pPair = pairs; pPair->key; ++pPair) {
             if (ffStrEqualsIgnCase(strVal, pPair->key)) {
                 *result = pPair->value;
-                return NULL;
+                return nullptr;
             }
         }
 
+        FF_DEBUG("The enum string \"%s\" is not one of the accepted names", strVal);
         return "Invalid enum string";
     } else {
+        FF_DEBUG("The enum value is of JSON type %s, not a string or an integer",
+            yyjson_get_type_desc(val));
         return "Invalid enum value type; must be a string or integer";
     }
 }
@@ -95,7 +116,7 @@ static bool parseModuleJsonObject(const char* type, yyjson_val* jsonVal, yyjson_
     for (FFModuleBaseInfo** modules = ffModuleInfos[toupper(type[0]) - 'A']; *modules; ++modules) {
         FFModuleBaseInfo* baseInfo = *modules;
         if (ffStrEqualsIgnCase(type, baseInfo->name)) {
-            uint8_t optionBuf[FF_OPTION_MAX_SIZE];
+            alignas(uint64_t) uint8_t optionBuf[FF_OPTION_MAX_SIZE];
             baseInfo->initOptions(optionBuf);
             if (jsonVal) {
                 baseInfo->parseJsonObject(optionBuf, jsonVal);
@@ -133,13 +154,16 @@ static bool parseModuleJsonObject(const char* type, yyjson_val* jsonVal, yyjson_
 
 static void prepareModuleJsonObject(const char* type, yyjson_val* module) {
     switch (type[0]) {
-        #if !FF_MODULE_DISABLE_CPUUSAGE
+        // Both `cpuusage` and `command` start with a c, and they are disabled by separate options,
+        // so the block has to survive either one being off -- otherwise a build with only the other
+        // one enabled would never prepare this module (see the same guard in `commandoption.c`).
+        #if !FF_MODULE_DISABLE_CPUUSAGE || !FF_MODULE_DISABLE_COMMAND
         case 'c':
         case 'C': {
-            if (ffStrEqualsIgnCase(type, FF_CPUUSAGE_MODULE_NAME)) {
+            if (ffStrEqualsIgnCase(type, ffCPUUsageModuleInfo.name)) {
                 ffPrepareCPUUsage();
-            } else if (ffStrEqualsIgnCase(type, FF_COMMAND_MODULE_NAME)) {
-                FF_A_CLEANUP(ffDestroyCommandOptions) FFCommandOptions options;
+            } else if (ffStrEqualsIgnCase(type, ffCommandModuleInfo.name)) {
+                [[gnu::cleanup(ffDestroyCommandOptions)]] FFCommandOptions options;
                 ffInitCommandOptions(&options);
                 if (module) {
                     ffCommandModuleInfo.parseJsonObject(&options, module);
@@ -153,8 +177,8 @@ static void prepareModuleJsonObject(const char* type, yyjson_val* module) {
         #if !FF_MODULE_DISABLE_DISKIO
         case 'd':
         case 'D': {
-            if (ffStrEqualsIgnCase(type, FF_DISKIO_MODULE_NAME)) {
-                FF_A_CLEANUP(ffDestroyDiskIOOptions) FFDiskIOOptions options;
+            if (ffStrEqualsIgnCase(type, ffDiskIOModuleInfo.name)) {
+                [[gnu::cleanup(ffDestroyDiskIOOptions)]] FFDiskIOOptions options;
                 ffInitDiskIOOptions(&options);
                 if (module) {
                     ffDiskIOModuleInfo.parseJsonObject(&options, module);
@@ -168,8 +192,8 @@ static void prepareModuleJsonObject(const char* type, yyjson_val* module) {
         #if !FF_MODULE_DISABLE_NETIO
         case 'n':
         case 'N': {
-            if (ffStrEqualsIgnCase(type, FF_NETIO_MODULE_NAME)) {
-                FF_A_CLEANUP(ffDestroyNetIOOptions) FFNetIOOptions options;
+            if (ffStrEqualsIgnCase(type, ffNetIOModuleInfo.name)) {
+                [[gnu::cleanup(ffDestroyNetIOOptions)]] FFNetIOOptions options;
                 ffInitNetIOOptions(&options);
                 if (module) {
                     ffNetIOModuleInfo.parseJsonObject(&options, module);
@@ -183,8 +207,8 @@ static void prepareModuleJsonObject(const char* type, yyjson_val* module) {
         #if !FF_MODULE_DISABLE_PUBLICIP
         case 'p':
         case 'P': {
-            if (ffStrEqualsIgnCase(type, FF_PUBLICIP_MODULE_NAME)) {
-                FF_A_CLEANUP(ffDestroyPublicIpOptions) FFPublicIPOptions options;
+            if (ffStrEqualsIgnCase(type, ffPublicIPModuleInfo.name)) {
+                [[gnu::cleanup(ffDestroyPublicIpOptions)]] FFPublicIPOptions options;
                 ffInitPublicIpOptions(&options);
                 if (module) {
                     ffPublicIPModuleInfo.parseJsonObject(&options, module);
@@ -195,11 +219,26 @@ static void prepareModuleJsonObject(const char* type, yyjson_val* module) {
         }
         #endif
 
+        #if !FF_MODULE_DISABLE_TOP
+        case 't':
+        case 'T': {
+            if (ffStrEqualsIgnCase(type, ffTopModuleInfo.name)) {
+                [[gnu::cleanup(ffDestroyTopOptions)]] FFTopOptions options;
+                ffInitTopOptions(&options);
+                if (module) {
+                    ffTopModuleInfo.parseJsonObject(&options, module);
+                }
+                ffPrepareTopProcesses(options.showTypes);
+            }
+            break;
+        }
+        #endif
+
         #if !FF_MODULE_DISABLE_WEATHER
         case 'w':
         case 'W': {
-            if (ffStrEqualsIgnCase(type, FF_WEATHER_MODULE_NAME)) {
-                FF_A_CLEANUP(ffDestroyWeatherOptions) FFWeatherOptions options;
+            if (ffStrEqualsIgnCase(type, ffWeatherModuleInfo.name)) {
+                [[gnu::cleanup(ffDestroyWeatherOptions)]] FFWeatherOptions options;
                 ffInitWeatherOptions(&options);
                 if (module) {
                     ffWeatherModuleInfo.parseJsonObject(&options, module);
@@ -239,14 +278,16 @@ static const char* printJsonConfig(FFdata* data, bool prepare) {
     assert(root);
 
     if (!yyjson_is_obj(root)) {
+        FF_DEBUG("The config root is of JSON type %s", yyjson_get_type_desc(root));
         return "Invalid JSON config format. Root value must be an object";
     }
 
     yyjson_val* modules = yyjson_obj_get(root, "modules");
     if (!modules) {
-        return NULL;
+        return nullptr;
     }
     if (!yyjson_is_arr(modules)) {
+        FF_DEBUG("'modules' is of JSON type %s", yyjson_get_type_desc(modules));
         return "Property 'modules' must be an array of strings or objects";
     }
 
@@ -261,13 +302,15 @@ static const char* printJsonConfig(FFdata* data, bool prepare) {
         }
 
         yyjson_val* module = item;
+        bool gatedOnSucceeded = false;
         const char* type = yyjson_get_str(module);
         if (type) {
-            module = NULL;
+            module = nullptr;
         } else if (yyjson_is_obj(module)) {
             yyjson_val* conditions = yyjson_obj_get(module, "condition");
             if (conditions) {
                 if (!yyjson_is_obj(conditions)) {
+                    FF_DEBUG("'condition' is of JSON type %s", yyjson_get_type_desc(conditions));
                     return "Property 'condition' must be an object";
                 }
 
@@ -294,8 +337,43 @@ static const char* printJsonConfig(FFdata* data, bool prepare) {
                 yyjson_val* previousSucceeded = yyjson_obj_get(conditions, "succeeded");
                 if (previousSucceeded && !unsafe_yyjson_is_null(previousSucceeded)) {
                     if (!unsafe_yyjson_is_bool(previousSucceeded)) {
+                        FF_DEBUG("'condition.succeeded' is of JSON type %s",
+                            yyjson_get_type_desc(previousSucceeded));
                         return "Property 'succeeded' in 'condition' must be a boolean";
                     }
+                    gatedOnSucceeded = true;
+
+                    if (prepare) {
+                        // Whether this module is printed at all depends on the result of the previous
+                        // one, which is only known in the print pass. Preparing it here would leave a
+                        // result behind that no print pass ever consumes, and since the modules are
+                        // paired by position (see `ffPrepareCommand` / `ffDetectCommand`), that
+                        // would silently shift every later module onto the wrong result.
+                        // Skip it, and let the module report the missing preparation if it turns out
+                        // to be printed after all.
+                        continue;
+                    }
+
+                    #if !FF_MODULE_DISABLE_COMMAND
+                    // A `command` module that runs in parallel is exactly the pairing above, so this
+                    // combination cannot be left to the print pass: the module would be handed the
+                    // result prepared for the next `command` module and print that instead of its
+                    // own output. Refused here rather than in the prepare pass, because returning
+                    // from there would leave every later module unprepared -- which the print pass
+                    // would then report as a failure of theirs.
+                    // `parallel` is on by default, so leaving the key out is the parallel case too.
+                    if (gatedOnSucceeded && ffStrEqualsIgnCase(yyjson_get_str(yyjson_obj_get(module, "type")), ffCommandModuleInfo.name)) {
+                        yyjson_val* parallel = yyjson_obj_get(module, "parallel");
+                        if (parallel == nullptr || yyjson_get_bool(parallel)) {
+                            FF_DEBUG("The command module at index %zu is gated on 'condition.succeeded' and runs in parallel", idx);
+                            return "Module \"command\" cannot be combined with \"condition.succeeded\" while it runs in "
+                                   "parallel: whether it is printed is only known in the print pass, so it cannot be "
+                                   "prepared, and the prepared results are matched to modules by position. Set "
+                                   "\"parallel\": false on it, or drop the condition.";
+                        }
+                    }
+                    #endif
+
                     if (succeeded != unsafe_yyjson_get_bool(previousSucceeded)) {
                         continue;
                     }
@@ -304,12 +382,14 @@ static const char* printJsonConfig(FFdata* data, bool prepare) {
 
             type = yyjson_get_str(yyjson_obj_get(module, "type"));
             if (!type) {
+                FF_DEBUG("The module object at index %zu has no \"type\" key, or it is not a string", idx);
                 return "module object must contain a \"type\" key ( case sensitive )";
             }
             if (yyjson_obj_size(module) == 1) { // contains only Property type
-                module = NULL;
+                module = nullptr;
             }
         } else {
+            FF_DEBUG("The modules entry at index %zu is of JSON type %s", idx, yyjson_get_type_desc(module));
             return "modules must be an array of strings or objects";
         }
 
@@ -347,9 +427,10 @@ static const char* printJsonConfig(FFdata* data, bool prepare) {
 #endif
     }
 
-    return NULL;
+    return nullptr;
 }
 
+[[gnu::cold]]
 void ffPrintJsonConfig(FFdata* data, bool prepare) {
     yyjson_mut_doc* jsonDoc = data->resultDoc;
     const char* error = printJsonConfig(data, prepare);
@@ -359,7 +440,7 @@ void ffPrintJsonConfig(FFdata* data, bool prepare) {
             yyjson_mut_obj_add_str(jsonDoc, obj, "error", error);
             yyjson_mut_doc_set_root(jsonDoc, obj);
         } else {
-            ffPrintError("JsonConfig", 0, NULL, FF_PRINT_TYPE_NO_CUSTOM_KEY, "%s", error);
+            ffPrintError("JsonConfig", 0, nullptr, FF_PRINT_TYPE_NO_CUSTOM_KEY, "%s", error);
         }
     }
 }

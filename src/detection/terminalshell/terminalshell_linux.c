@@ -1,9 +1,15 @@
 #include "terminalshell.h"
+#include "common/FFcache.h"
+#include "common/debug.h"
 #include "common/io.h"
 #include "common/parsing.h"
 #include "common/processing.h"
 #include "common/thread.h"
 #include "common/strutil.h"
+
+#ifdef __ANDROID__
+    #include "common/android/applabel.h"
+#endif
 
 #include <string.h>
 #include <stdlib.h>
@@ -21,7 +27,7 @@ static pid_t getShellInfo(FFShellResult* result, pid_t pid) {
     pid_t ppid = 0;
     int32_t tty = -1;
 
-    const char* userShellName = NULL;
+    const char* userShellName = nullptr;
     {
         uint32_t index = ffStrbufLastIndexC(&instance.state.platform.userShell, '/');
         if (index == instance.state.platform.userShell.length) {
@@ -31,7 +37,7 @@ static pid_t getShellInfo(FFShellResult* result, pid_t pid) {
         }
     }
 
-    while (pid > 1 && ffProcessGetBasicInfoLinux(pid, &result->processName, &ppid, &tty) == NULL) {
+    while (pid > 1 && ffProcessGetBasicInfoLinux(pid, &result->processName, &ppid, &tty) == nullptr) {
         if (!ffStrbufEqualS(&result->processName, userShellName)) {
             // Common programs that are between terminal and own process, but are not the shell
             if (
@@ -79,7 +85,7 @@ static pid_t getShellInfo(FFShellResult* result, pid_t pid) {
 static pid_t getTerminalInfo(FFTerminalResult* result, pid_t pid) {
     pid_t ppid = 0;
 
-    while (pid > 1 && ffProcessGetBasicInfoLinux(pid, &result->processName, &ppid, NULL) == NULL) {
+    while (pid > 1 && ffProcessGetBasicInfoLinux(pid, &result->processName, &ppid, nullptr) == nullptr) {
         // Known shells
         if (
             pid == 1 || // init/systemd
@@ -90,7 +96,9 @@ static pid_t getTerminalInfo(FFTerminalResult* result, pid_t pid) {
             ffStrbufEqualS(&result->processName, "bash") ||
             ffStrbufEqualS(&result->processName, "zsh") ||
             ffStrbufEqualS(&result->processName, "ksh") ||
+            ffStrbufEqualS(&result->processName, "ksh93") ||
             ffStrbufEqualS(&result->processName, "mksh") ||
+            ffStrbufEqualS(&result->processName, "pdksh") ||
             ffStrbufEqualS(&result->processName, "oksh") ||
             ffStrbufEqualS(&result->processName, "csh") ||
             ffStrbufEqualS(&result->processName, "tcsh") ||
@@ -130,7 +138,7 @@ static pid_t getTerminalInfo(FFTerminalResult* result, pid_t pid) {
                         break;
                     }
                 }
-                if (pLeft == pRight && ffProcessGetBasicInfoLinux(ppid, &result->processName, &ppid, NULL) != NULL) {
+                if (pLeft == pRight && ffProcessGetBasicInfoLinux(ppid, &result->processName, &ppid, nullptr) != nullptr) {
                     return 0;
                 }
             }
@@ -147,13 +155,13 @@ static pid_t getTerminalInfo(FFTerminalResult* result, pid_t pid) {
 
 static bool getTerminalInfoByPidEnv(FFTerminalResult* result, const char* pidEnv) {
     const char* envStr = getenv(pidEnv);
-    if (envStr == NULL) {
+    if (envStr == nullptr) {
         return false;
     }
 
-    pid_t pid = (pid_t) strtol(envStr, NULL, 10);
+    pid_t pid = (pid_t) strtol(envStr, nullptr, 10);
     result->pid = (uint32_t) pid;
-    if (ffProcessGetBasicInfoLinux(pid, &result->processName, (pid_t*) &result->ppid, NULL) == NULL) {
+    if (ffProcessGetBasicInfoLinux(pid, &result->processName, (pid_t*) &result->ppid, nullptr) == nullptr) {
         ffProcessGetInfoLinux(pid, &result->processName, &result->exe, &result->exeName, &result->exePath);
         return true;
     }
@@ -185,15 +193,15 @@ static void getTerminalFromEnv(FFTerminalResult* result) {
         result->pid = result->ppid = 0;
     }
 
-    const char* term = NULL;
+    const char* term = nullptr;
 
     // SSH
     if (
-        getenv("SSH_TTY") != NULL) {
+        getenv("SSH_TTY") != nullptr) {
         term = getenv("SSH_TTY");
     } else if (
-        getenv("KITTY_PID") != NULL ||
-        getenv("KITTY_INSTALLATION_DIR") != NULL) {
+        getenv("KITTY_PID") != nullptr ||
+        getenv("KITTY_INSTALLATION_DIR") != nullptr) {
         if (getTerminalInfoByPidEnv(result, "KITTY_PID")) {
             return;
         }
@@ -203,29 +211,29 @@ static void getTerminalFromEnv(FFTerminalResult* result) {
 #ifdef __linux__ // WSL
     // Windows Terminal
     else if (
-        getenv("WT_SESSION") != NULL ||
-        getenv("WT_PROFILE_ID") != NULL)
+        getenv("WT_SESSION") != nullptr ||
+        getenv("WT_PROFILE_ID") != nullptr)
         term = "Windows Terminal";
 
     // ConEmu
     else if (
-        getenv("ConEmuPID") != NULL) {
+        getenv("ConEmuPID") != nullptr) {
         term = "ConEmu";
     }
 #endif
 
     // Alacritty
     else if (
-        getenv("ALACRITTY_SOCKET") != NULL ||
-        getenv("ALACRITTY_LOG") != NULL ||
-        getenv("ALACRITTY_WINDOW_ID") != NULL) {
+        getenv("ALACRITTY_SOCKET") != nullptr ||
+        getenv("ALACRITTY_LOG") != nullptr ||
+        getenv("ALACRITTY_WINDOW_ID") != nullptr) {
         term = "Alacritty";
     }
 #ifdef __ANDROID__
     // Termux
     else if (
-        getenv("TERMUX_VERSION") != NULL ||
-        getenv("TERMUX_MAIN_PACKAGE_FORMAT") != NULL) {
+        getenv("TERMUX_VERSION") != nullptr ||
+        getenv("TERMUX_MAIN_PACKAGE_FORMAT") != nullptr) {
         if (getTerminalInfoByPidEnv(result, "TERMUX_APP__PID")) {
             return;
         }
@@ -236,22 +244,22 @@ static void getTerminalFromEnv(FFTerminalResult* result) {
 #if defined(__linux__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__GNU__)
     // Konsole
     else if (
-        getenv("KONSOLE_VERSION") != NULL)
+        getenv("KONSOLE_VERSION") != nullptr)
         term = "konsole";
 
     else if (
-        getenv("GNOME_TERMINAL_SCREEN") != NULL ||
-        getenv("GNOME_TERMINAL_SERVICE") != NULL) {
+        getenv("GNOME_TERMINAL_SCREEN") != nullptr ||
+        getenv("GNOME_TERMINAL_SERVICE") != nullptr) {
         term = "gnome-terminal";
     }
 #endif
 
     // MacOS, mintty
-    else if (getenv("TERM_PROGRAM") != NULL) {
+    else if (getenv("TERM_PROGRAM") != nullptr) {
         term = getenv("TERM_PROGRAM");
     }
 
-    else if (getenv("LC_TERMINAL") != NULL) {
+    else if (getenv("LC_TERMINAL") != nullptr) {
         term = getenv("LC_TERMINAL");
     }
 
@@ -321,8 +329,18 @@ static void setTerminalInfoDetails(FFTerminalResult* result) {
 
 #if defined(__ANDROID__)
 
-    else if (ffStrbufEqualS(&result->processName, "com.termux"))
+    else if (ffStrbufEqualS(&result->processName, "com.termux")) {
+        // The app is installed under a label rather than under its package name, and the label is
+        // what every screen the user sees calls it -- "Termux:Launcher" on the test device, not
+        // "Termux". The package name is the fallback for a build whose label cannot be read, which
+        // includes an app whose label is a literal string in its manifest rather than a resource
+        // reference; see common/android/applabel.h for what that read costs and when it fails.
         ffStrbufInitStatic(&result->prettyName, "Termux");
+        const char* labelError = ffAndroidGetAppLabel("com.termux", &result->prettyName);
+        if (labelError != nullptr) {
+            FF_DEBUG("The label of com.termux could not be resolved: %s", labelError);
+        }
+    }
 
 #elif defined(__linux__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__GNU__)
 
@@ -376,74 +394,120 @@ static void setTerminalInfoDetails(FFTerminalResult* result) {
     #define FF_EXE_PATH_LEN 260
 #endif
 
-const FFShellResult* ffDetectShell() {
-    static FFShellResult result;
-    static bool init = false;
-    if (init) {
-        return &result;
-    }
-    init = true;
+static FFShellResult shellResult;
 
-    ffStrbufInit(&result.processName);
-    ffStrbufInitA(&result.exe, FF_EXE_PATH_LEN);
-    result.exeName = result.exe.chars;
-    ffStrbufInit(&result.exePath);
-    ffStrbufInit(&result.version);
-    result.pid = 0;
-    result.ppid = 0;
-    result.tty = -1;
+static void destroyShellResult(void* storage) {
+    FFShellResult* result = storage;
+
+    ffStrbufDestroy(&result->processName);
+    ffStrbufDestroy(&result->exe);
+    result->exeName = result->exe.chars; // `exeName` points into `exe`, which is empty again
+    ffStrbufDestroy(&result->exePath);
+    ffStrbufDestroy(&result->prettyName);
+    ffStrbufDestroy(&result->version);
+    result->pid = 0;
+    result->ppid = 0;
+    result->tty = -1;
+}
+
+static FFcacheEntry ffCacheEntryShell = {
+    .name = "shell",
+    .storage = &shellResult,
+    .destroy = destroyShellResult,
+};
+
+const FFShellResult* ffDetectShell() {
+    FFShellResult* result = &shellResult;
+
+    if (!ffCacheBeginInit(&ffCacheEntryShell)) {
+        return result;
+    }
+
+    ffStrbufInit(&result->processName);
+    ffStrbufInitA(&result->exe, FF_EXE_PATH_LEN);
+    result->exeName = result->exe.chars;
+    ffStrbufInit(&result->exePath);
+    ffStrbufInit(&result->version);
+    result->pid = 0;
+    result->ppid = 0;
+    result->tty = -1;
 
     pid_t ppid = getppid();
 
     const char* ignoreParent = getenv("FFTS_IGNORE_PARENT");
     if (ignoreParent && ffStrEquals(ignoreParent, "1")) {
         FF_STRBUF_AUTO_DESTROY _ = ffStrbufCreate();
-        ffProcessGetBasicInfoLinux(ppid, &_, &ppid, NULL);
+        ffProcessGetBasicInfoLinux(ppid, &_, &ppid, nullptr);
     }
 
-    ppid = getShellInfo(&result, ppid);
-    getUserShellFromEnv(&result);
+    ppid = getShellInfo(result, ppid);
+    getUserShellFromEnv(result);
 
-    if (result.processName.length > 0) {
-        setShellInfoDetails(&result);
+    if (result->processName.length > 0) {
+        setShellInfoDetails(result);
         if (instance.config.general.detectVersion) {
-            fftsGetShellVersion(result.exePath.length > 0 ? &result.exePath : &result.exe, result.exeName, &result.version);
+            if (!fftsGetShellVersion(result->exePath.length > 0 ? &result->exePath : &result->exe, result->exeName, &result->version)) {
+                ffStrbufClear(&result->version);
+            }
         }
     }
 
-    return &result;
+    return result;
 }
 
-const FFTerminalResult* ffDetectTerminal() {
-    static FFTerminalResult result;
-    static bool init = false;
-    if (init) {
-        return &result;
-    }
-    init = true;
+static FFTerminalResult terminalResult;
 
-    ffStrbufInit(&result.processName);
-    ffStrbufInitA(&result.exe, FF_EXE_PATH_LEN);
-    result.exeName = result.exe.chars;
-    ffStrbufInit(&result.exePath);
-    ffStrbufInit(&result.version);
-    ffStrbufInitS(&result.tty, ttyname(STDOUT_FILENO));
-    result.pid = 0;
-    result.ppid = 0;
+static void destroyTerminalResult(void* storage) {
+    FFTerminalResult* result = storage;
+
+    ffStrbufDestroy(&result->processName);
+    ffStrbufDestroy(&result->exe);
+    result->exeName = result->exe.chars; // `exeName` points into `exe`, which is empty again
+    ffStrbufDestroy(&result->exePath);
+    ffStrbufDestroy(&result->prettyName);
+    ffStrbufDestroy(&result->version);
+    ffStrbufDestroy(&result->tty);
+    result->pid = 0;
+    result->ppid = 0;
+}
+
+static FFcacheEntry ffCacheEntryTerminal = {
+    .name = "terminal",
+    .storage = &terminalResult,
+    .destroy = destroyTerminalResult,
+};
+
+const FFTerminalResult* ffDetectTerminal() {
+    FFTerminalResult* result = &terminalResult;
+
+    if (!ffCacheBeginInit(&ffCacheEntryTerminal)) {
+        return result;
+    }
+
+    ffStrbufInit(&result->processName);
+    ffStrbufInitA(&result->exe, FF_EXE_PATH_LEN);
+    result->exeName = result->exe.chars;
+    ffStrbufInit(&result->exePath);
+    ffStrbufInit(&result->version);
+    ffStrbufInitS(&result->tty, ttyname(STDOUT_FILENO));
+    result->pid = 0;
+    result->ppid = 0;
 
     pid_t ppid = (pid_t) ffDetectShell()->ppid;
 
     if (ppid) {
-        ppid = getTerminalInfo(&result, ppid);
+        ppid = getTerminalInfo(result, ppid);
     }
-    getTerminalFromEnv(&result);
+    getTerminalFromEnv(result);
 
-    if (result.processName.length > 0) {
-        setTerminalInfoDetails(&result);
+    if (result->processName.length > 0) {
+        setTerminalInfoDetails(result);
         if (instance.config.general.detectVersion) {
-            fftsGetTerminalVersion(&result.processName, result.exePath.length > 0 ? &result.exePath : &result.exe, &result.version);
+            if (!fftsGetTerminalVersion(&result->processName, result->exePath.length > 0 ? &result->exePath : &result->exe, &result->version)) {
+                ffStrbufClear(&result->version);
+            }
         }
     }
 
-    return &result;
+    return result;
 }

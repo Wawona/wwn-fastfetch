@@ -1,10 +1,12 @@
 #include "poweradapter.h"
+#include "common/debug.h"
 #include "common/io.h"
 #include "common/strutil.h"
 
 #include <dirent.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <string.h>
 
 static void parsePowerAdapter(int dfd, const char* id, FFlist* results) {
     FF_STRBUF_AUTO_DESTROY tmpBuffer = ffStrbufCreate();
@@ -71,12 +73,13 @@ static void parsePowerAdapter(int dfd, const char* id, FFlist* results) {
 
 const char* ffDetectPowerAdapter(FFlist* results) {
     FF_AUTO_CLOSE_DIR DIR* dirp = opendir("/sys/class/power_supply/");
-    if (dirp == NULL) {
-        return "opendir(\"/sys/class/power_supply/\") == NULL";
+    if (dirp == nullptr) {
+        FF_DEBUG("opendir(\"/sys/class/power_supply/\") failed: %s", strerror(errno));
+        return "opendir(\"/sys/class/power_supply/\") == nullptr";
     }
 
     struct dirent* entry;
-    while ((entry = readdir(dirp)) != NULL) {
+    while ((entry = readdir(dirp)) != nullptr) {
         if (entry->d_name[0] == '.') {
             continue;
         }
@@ -87,5 +90,5 @@ const char* ffDetectPowerAdapter(FFlist* results) {
         }
     }
 
-    return NULL;
+    return nullptr;
 }

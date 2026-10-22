@@ -3,38 +3,58 @@
 #include "modules/command/command.h"
 #include "detection/command/command.h"
 
+#if defined(_WIN32)
+// `ffStrbufGetline()` splits on `\n` only, so a CRLF line keeps its trailing `\r`. That is what every
+// `cmd.exe` builtin and most native Windows tools produce, and the leftover carriage return makes the
+// terminal jump back to the start of the line. The `\r` is overwritten with a NUL, so `line` stays a
+// usable C string; the length without the `\r` is returned for callers that need to copy the line.
+//
+// `len` itself must stay the distance from the line start to the delimiter: `ffStrbufGetdelim()`
+// advances with `*lineptr += *n`, so shortening it would make the next call start inside this line.
+static size_t trimCarriageReturn(char* line, size_t len) {
+    if (len > 0 && line[len - 1] == '\r') {
+        line[len - 1] = '\0';
+        return len - 1;
+    }
+    return len;
+}
+#endif
+
 bool ffPrintCommand(FFCommandOptions* options) {
     FF_STRBUF_AUTO_DESTROY result = ffStrbufCreate();
     const char* error = ffDetectCommand(options, &result);
 
     if (error) {
-        ffPrintError(FF_COMMAND_MODULE_NAME, 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "%s", error);
+        ffPrintError(FF_MODULE_GET_DISPLAY_NAME(Command), 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "%s", error);
         return false;
     }
 
     if (!result.length) {
-        ffPrintError(FF_COMMAND_MODULE_NAME, 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "No result generated");
+        ffPrintError(FF_MODULE_GET_DISPLAY_NAME(Command), 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "No result generated");
         return false;
     }
 
     if (options->splitLines) {
-        uint8_t index = 0;
-        char* line = NULL;
+        uint32_t index = 0;
+        char* line = nullptr;
         size_t len = 0;
         while (ffStrbufGetline(&line, &len, &result)) {
+#if defined(_WIN32)
+            trimCarriageReturn(line, len);
+#endif
             if (options->moduleArgs.outputFormat.length == 0) {
-                ffPrintLogoAndKey(FF_COMMAND_MODULE_NAME, ++index, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT);
+                ffPrintLogoAndKey(FF_MODULE_GET_DISPLAY_NAME(Command), ++index, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT);
                 puts(line);
             } else {
-                FF_PRINT_FORMAT_CHECKED(FF_COMMAND_MODULE_NAME, ++index, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, ((FFformatarg[]) { FF_ARG(line, "result") }));
+                FF_PRINT_FORMAT_CHECKED(FF_MODULE_GET_DISPLAY_NAME(Command), ++index, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, ((FFformatarg[]) { FF_ARG(line, "result") }));
             }
         }
     } else {
         if (options->moduleArgs.outputFormat.length == 0) {
-            ffPrintLogoAndKey(FF_COMMAND_MODULE_NAME, 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT);
+            ffPrintLogoAndKey(FF_MODULE_GET_DISPLAY_NAME(Command), 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT);
             ffStrbufPutTo(&result, stdout);
         } else {
-            FF_PRINT_FORMAT_CHECKED(FF_COMMAND_MODULE_NAME, 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, ((FFformatarg[]) { FF_ARG(result, "result") }));
+            FF_PRINT_FORMAT_CHECKED(FF_MODULE_GET_DISPLAY_NAME(Command), 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, ((FFformatarg[]) { FF_ARG(result, "result") }));
         }
     }
 
@@ -65,7 +85,24 @@ void ffParseCommandJsonObject(FFCommandOptions* options, yyjson_val* module) {
         }
 
         if (unsafe_yyjson_equals_str(key, "useStdErr")) {
-            options->useStdErr = yyjson_get_bool(val);
+            options->useOutput = yyjson_get_bool(val) ? FF_PROCESS_OUTPUT_STDERR_BIT : FF_PROCESS_OUTPUT_STDOUT_BIT;
+            ffPrintError(FF_MODULE_GET_DISPLAY_NAME(Command), 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "useStdErr is deprecated, use useOutput instead");
+            continue;
+        }
+
+        if (unsafe_yyjson_equals_str(key, "useOutput")) {
+            int value;
+            const char* error = ffJsonConfigParseEnum(val, &value, (FFKeyValuePair[]) {
+                                                                       { "stdout", FF_PROCESS_OUTPUT_STDOUT_BIT },
+                                                                       { "stderr", FF_PROCESS_OUTPUT_STDERR_BIT },
+                                                                       { "both", FF_PROCESS_OUTPUT_BOTH },
+                                                                       {},
+                                                                   });
+            if (error) {
+                ffPrintError(FF_MODULE_GET_DISPLAY_NAME(Command), 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "Invalid %s value: %s", unsafe_yyjson_get_str(key), error);
+            } else {
+                options->useOutput = (FFProcessOutputType) value;
+            }
             continue;
         }
 
@@ -79,22 +116,35 @@ void ffParseCommandJsonObject(FFCommandOptions* options, yyjson_val* module) {
             continue;
         }
 
-        ffPrintError(FF_COMMAND_MODULE_NAME, 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "Unknown JSON key %s", unsafe_yyjson_get_str(key));
+        ffPrintError(FF_MODULE_GET_DISPLAY_NAME(Command), 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "Unknown JSON key %s", unsafe_yyjson_get_str(key));
     }
 }
 
+[[gnu::cold]]
 void ffGenerateCommandJsonConfig(FFCommandOptions* options, yyjson_mut_doc* doc, yyjson_mut_val* module) {
     ffJsonConfigGenerateModuleArgsConfig(doc, module, &options->moduleArgs);
 
     yyjson_mut_obj_add_strbuf(doc, module, "shell", &options->shell);
     yyjson_mut_obj_add_strbuf(doc, module, "param", &options->param);
     yyjson_mut_obj_add_strbuf(doc, module, "text", &options->text);
-    yyjson_mut_obj_add_bool(doc, module, "useStdErr", options->useStdErr);
+    switch (options->useOutput) {
+        case FF_PROCESS_OUTPUT_STDOUT_BIT:
+            yyjson_mut_obj_add_str(doc, module, "useOutput", "stdout");
+            break;
+        case FF_PROCESS_OUTPUT_STDERR_BIT:
+            yyjson_mut_obj_add_str(doc, module, "useOutput", "stderr");
+            break;
+        case FF_PROCESS_OUTPUT_BOTH:
+            yyjson_mut_obj_add_str(doc, module, "useOutput", "both");
+            break;
+        default:
+            break;
+    }
     yyjson_mut_obj_add_bool(doc, module, "parallel", options->parallel);
     yyjson_mut_obj_add_bool(doc, module, "splitLines", options->splitLines);
 }
 
-bool ffGenerateCommandJsonResult(FF_A_UNUSED FFCommandOptions* options, yyjson_mut_doc* doc, yyjson_mut_val* module) {
+bool ffGenerateCommandJsonResult([[maybe_unused]] FFCommandOptions* options, yyjson_mut_doc* doc, yyjson_mut_val* module) {
     FF_STRBUF_AUTO_DESTROY result = ffStrbufCreate();
     const char* error = ffDetectCommand(options, &result);
 
@@ -110,10 +160,17 @@ bool ffGenerateCommandJsonResult(FF_A_UNUSED FFCommandOptions* options, yyjson_m
 
     if (options->splitLines) {
         yyjson_mut_val* jsonArray = yyjson_mut_obj_add_arr(doc, module, "result");
-        char* line = NULL;
+        char* line = nullptr;
         size_t len = 0;
         while (ffStrbufGetline(&line, &len, &result)) {
-            yyjson_mut_arr_add_strncpy(doc, jsonArray, line, len);
+            // `len` has to stay the distance to the delimiter (see `trimCarriageReturn`), so the
+            // possibly shorter length of the line itself is tracked separately.
+#if defined(_WIN32)
+            size_t contentLen = trimCarriageReturn(line, len);
+#else
+            size_t contentLen = len;
+#endif
+            yyjson_mut_arr_add_strncpy(doc, jsonArray, line, contentLen);
         }
     } else {
         yyjson_mut_obj_add_strbuf(doc, module, "result", &result);
@@ -134,13 +191,15 @@ void ffInitCommandOptions(FFCommandOptions* options) {
     );
     ffStrbufInitStatic(&options->param,
 #ifdef _WIN32
-        "/c"
+        "/d/c"
 #else
         "-c"
 #endif
     );
     ffStrbufInit(&options->text);
-    options->useStdErr = false;
+    // Capture both streams by default: most tools log to stdout or stderr without saying which, and
+    // the previous single-stream default silently dropped one of them.
+    options->useOutput = FF_PROCESS_OUTPUT_BOTH;
     options->parallel = true;
     options->splitLines = false;
 }
@@ -153,8 +212,31 @@ void ffDestroyCommandOptions(FFCommandOptions* options) {
 }
 
 FFModuleBaseInfo ffCommandModuleInfo = {
-    .name = FF_COMMAND_MODULE_NAME,
+    .name = "Command",
     .description = "Run custom shell scripts",
+    .displayName = {
+        .en = "Command",
+        .ar = "الأمر",
+        .cs = "Příkaz",
+        .de = "Befehl",
+        .es = "Comando",
+        .fi = "Komento",
+        .fr = "Commande",
+        .gl = "Comando",
+        .he = "פקודה",
+        .id = "Perintah",
+        .it = "Comando",
+        .ja = "コマンド",
+        .ko = "명령어",
+        .pl = "Polecenie",
+        .pt = "Comando",
+        .ru = "Команда",
+        .tr = "Komut",
+        .uk = "Команда",
+        .vi = "Lệnh",
+        .zh_CN = "命令",
+        .zh_TW = "命令",
+    },
     .initOptions = (void*) ffInitCommandOptions,
     .destroyOptions = (void*) ffDestroyCommandOptions,
     .parseJsonObject = (void*) ffParseCommandJsonObject,
@@ -163,5 +245,5 @@ FFModuleBaseInfo ffCommandModuleInfo = {
     .generateJsonConfig = (void*) ffGenerateCommandJsonConfig,
     .formatArgs = FF_FORMAT_ARG_LIST(((FFModuleFormatArg[]) {
         { "Command result", "result" },
-    }))
+    })),
 };

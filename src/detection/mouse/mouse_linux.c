@@ -1,18 +1,20 @@
 #include "mouse.h"
+#include "common/debug.h"
 #include "common/io.h"
 #include "common/strutil.h"
 
 const char* ffDetectMouse(FFlist* devices /* List of FFMouseDevice */) {
     FF_AUTO_CLOSE_DIR DIR* dirp = opendir("/sys/class/input/");
-    if (dirp == NULL) {
-        return "opendir(\"/sys/class/input/\") == NULL";
+    if (dirp == nullptr) {
+        FF_DEBUG("opendir(\"/sys/class/input/\") failed: %s", strerror(errno));
+        return "opendir(\"/sys/class/input/\") == nullptr";
     }
 
     FF_STRBUF_AUTO_DESTROY path = ffStrbufCreateS("/sys/class/input/");
     uint32_t baseLen = path.length;
 
     struct dirent* entry;
-    while ((entry = readdir(dirp)) != NULL) {
+    while ((entry = readdir(dirp)) != nullptr) {
         if (!ffStrStartsWith(entry->d_name, "mouse")) {
             continue;
         }
@@ -41,5 +43,5 @@ const char* ffDetectMouse(FFlist* devices /* List of FFMouseDevice */) {
         ffStrbufSubstrBefore(&path, baseLen);
     }
 
-    return NULL;
+    return nullptr;
 }

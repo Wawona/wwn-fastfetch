@@ -19,6 +19,8 @@ static inline void applyVulkanVersion(uint32_t vulkanVersion, FFVersion* ffVersi
 }
 
 static void applyDriverName(VkPhysicalDeviceDriverPropertiesKHR* properties, FFstrbuf* result) {
+    ffStrbufClear(result);
+
     if (!ffStrSet(properties->driverName)) {
         return;
     }
@@ -29,7 +31,7 @@ static void applyDriverName(VkPhysicalDeviceDriverPropertiesKHR* properties, FFs
      * Some drivers (android for example) expose a multiline string as driver info.
      * It contains too much info anyways, so we just don't append it.
      */
-    if (!ffStrSet(properties->driverInfo) || strchr(properties->driverInfo, '\n') != NULL) {
+    if (!ffStrSet(properties->driverInfo) || strchr(properties->driverInfo, '\n') != nullptr) {
         return;
     }
 
@@ -67,8 +69,8 @@ static const char* detectVulkan(FFVulkanResult* result) {
 
     // We need to get the function pointer this way, because it is only provided by vulkan 1.1 and higher.
     // a dlsym would fail on 1.0 implementations
-    PFN_vkEnumerateInstanceVersion ffvkEnumerateInstanceVersion = (PFN_vkEnumerateInstanceVersion) ffvkGetInstanceProcAddr(NULL, "vkEnumerateInstanceVersion");
-    if (ffvkEnumerateInstanceVersion != NULL) {
+    PFN_vkEnumerateInstanceVersion ffvkEnumerateInstanceVersion = (PFN_vkEnumerateInstanceVersion) ffvkGetInstanceProcAddr(nullptr, "vkEnumerateInstanceVersion");
+    if (ffvkEnumerateInstanceVersion != nullptr) {
         uint32_t version;
         if (ffvkEnumerateInstanceVersion(&version) == VK_SUCCESS) {
             applyVulkanVersion(version, &instanceVersion);
@@ -89,10 +91,10 @@ static const char* detectVulkan(FFVulkanResult* result) {
     FF_DEBUG("Creating Vulkan instance with requested API version %s", instanceVersion.minor >= 1 ? "1.1" : "1.0");
     VkResult res = ffvkCreateInstance(&(VkInstanceCreateInfo) {
                                           .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
-                                          .pNext = NULL,
+                                          .pNext = nullptr,
                                           .pApplicationInfo = &(VkApplicationInfo) {
                                               .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
-                                              .pNext = NULL,
+                                              .pNext = nullptr,
                                               .pApplicationName = FASTFETCH_PROJECT_NAME,
                                               .applicationVersion = projectVersion,
                                               .pEngineName = "vulkanPrintGPUs",
@@ -101,11 +103,11 @@ static const char* detectVulkan(FFVulkanResult* result) {
                                               // We need to request 1.1 to get physicalDeviceDriverProperties
                                               .apiVersion = instanceVersion.minor >= 1 ? VK_API_VERSION_1_1 : VK_API_VERSION_1_0 },
                                           .enabledLayerCount = 0,
-                                          .ppEnabledLayerNames = NULL,
+                                          .ppEnabledLayerNames = nullptr,
                                           .enabledExtensionCount = 0,
-                                          .ppEnabledExtensionNames = NULL,
+                                          .ppEnabledExtensionNames = nullptr,
                                           .flags = 0 },
-        NULL,
+        nullptr,
         &vkInstance);
     if (res != VK_SUCCESS) {
         FF_DEBUG("ffvkCreateInstance() failed with VkResult=%d", res);
@@ -140,7 +142,7 @@ static const char* detectVulkan(FFVulkanResult* result) {
     res = ffvkEnumeratePhysicalDevices(vkInstance, &physicalDeviceCount, physicalDevices);
     if (res != VK_SUCCESS) {
         FF_DEBUG("ffvkEnumeratePhysicalDevices() failed with VkResult=%d", res);
-        ffvkDestroyInstance(vkInstance, NULL);
+        ffvkDestroyInstance(vkInstance, nullptr);
         switch (res) {
             case VK_ERROR_OUT_OF_HOST_MEMORY:
                 return "ffvkEnumeratePhysicalDevices() failed: VK_ERROR_OUT_OF_HOST_MEMORY";
@@ -156,7 +158,7 @@ static const char* detectVulkan(FFVulkanResult* result) {
     }
     FF_DEBUG("Enumerated %u Vulkan physical device(s)", physicalDeviceCount);
 
-    PFN_vkGetPhysicalDeviceProperties ffvkGetPhysicalDeviceProperties = NULL;
+    PFN_vkGetPhysicalDeviceProperties ffvkGetPhysicalDeviceProperties = nullptr;
     PFN_vkGetPhysicalDeviceProperties2 ffvkGetPhysicalDeviceProperties2 = (PFN_vkGetPhysicalDeviceProperties2) ffvkGetInstanceProcAddr(vkInstance, "vkGetPhysicalDeviceProperties2"); // 1.1
     if (!ffvkGetPhysicalDeviceProperties2) {
         ffvkGetPhysicalDeviceProperties = (PFN_vkGetPhysicalDeviceProperties) ffvkGetInstanceProcAddr(vkInstance, "vkGetPhysicalDeviceProperties");
@@ -167,7 +169,7 @@ static const char* detectVulkan(FFVulkanResult* result) {
     PFN_vkGetPhysicalDeviceMemoryProperties ffvkGetPhysicalDeviceMemoryProperties = (PFN_vkGetPhysicalDeviceMemoryProperties) ffvkGetInstanceProcAddr(vkInstance, "vkGetPhysicalDeviceMemoryProperties");
     if (!ffvkGetPhysicalDeviceMemoryProperties) {
         FF_DEBUG("vkGetPhysicalDeviceMemoryProperties is unavailable");
-        ffvkDestroyInstance(vkInstance, NULL);
+        ffvkDestroyInstance(vkInstance, nullptr);
         return "vkGetPhysicalDeviceMemoryProperties is not available";
     }
 
@@ -187,7 +189,7 @@ static const char* detectVulkan(FFVulkanResult* result) {
             .pNext = &driverProperties,
         };
 
-        if (ffvkGetPhysicalDeviceProperties2 != NULL) {
+        if (ffvkGetPhysicalDeviceProperties2 != nullptr) {
             ffvkGetPhysicalDeviceProperties2(physicalDevices[i], &physicalDeviceProperties);
         } else {
             ffvkGetPhysicalDeviceProperties(physicalDevices[i], &physicalDeviceProperties.properties);
@@ -250,7 +252,12 @@ static const char* detectVulkan(FFVulkanResult* result) {
 
         ffStrbufInitS(&gpu->name, physicalDeviceProperties.properties.deviceName);
 
-        gpu->type = physicalDeviceProperties.properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU ? FF_GPU_TYPE_DISCRETE : FF_GPU_TYPE_INTEGRATED;
+        switch (physicalDeviceProperties.properties.deviceType) {
+            case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU: gpu->type = FF_GPU_TYPE_DISCRETE; break;
+            case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU:
+            case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU: gpu->type = FF_GPU_TYPE_INTEGRATED; break; // Virtual machine?
+            default: gpu->type = FF_GPU_TYPE_UNKNOWN; break;
+        }
         ffStrbufInitS(&gpu->vendor, ffGPUGetVendorString(physicalDeviceProperties.properties.vendorID));
         ffStrbufInitS(&gpu->driver, driverProperties.driverInfo);
         ffStrbufInit(&gpu->memoryType);
@@ -296,9 +303,9 @@ static const char* detectVulkan(FFVulkanResult* result) {
         result->conformanceVersion.chars,
         result->gpus.length);
 
-    ffvkDestroyInstance(vkInstance, NULL);
+    ffvkDestroyInstance(vkInstance, nullptr);
     FF_DEBUG("Destroyed Vulkan instance");
-    return NULL;
+    return nullptr;
 }
 
 #endif

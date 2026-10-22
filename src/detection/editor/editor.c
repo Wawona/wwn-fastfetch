@@ -7,7 +7,7 @@
 
 #include <stdlib.h>
 
-static bool extractNvimVersionFromBinary(const char* str, FF_A_UNUSED uint32_t len, void* userdata) {
+static bool extractNvimVersionFromBinary(const char* str, [[maybe_unused]] uint32_t len, void* userdata) {
     if (!ffStrStartsWith(str, "NVIM v")) {
         return true;
     }
@@ -15,7 +15,7 @@ static bool extractNvimVersionFromBinary(const char* str, FF_A_UNUSED uint32_t l
     return false;
 }
 
-static bool extractVimVersionFromBinary(const char* str, FF_A_UNUSED uint32_t len, void* userdata) {
+static bool extractVimVersionFromBinary(const char* str, [[maybe_unused]] uint32_t len, void* userdata) {
     if (!ffStrStartsWith(str, "VIM - Vi IMproved ")) {
         return true;
     }
@@ -24,7 +24,7 @@ static bool extractVimVersionFromBinary(const char* str, FF_A_UNUSED uint32_t le
     return false;
 }
 
-static bool extractNanoVersionFromBinary(const char* str, FF_A_UNUSED uint32_t len, void* userdata) {
+static bool extractNanoVersionFromBinary(const char* str, [[maybe_unused]] uint32_t len, void* userdata) {
     if (!ffStrStartsWith(str, "GNU nano ")) {
         return true;
     }
@@ -32,17 +32,33 @@ static bool extractNanoVersionFromBinary(const char* str, FF_A_UNUSED uint32_t l
     return false;
 }
 
+// The message is printed to the user verbatim, so it has to name the variable that was wrong:
+// `"Executable not found"` from `ffFindExecutableInPath()` doesn't say what was searched for.
+static const char* notAnExecutable(bool isVisual) {
+    return isVisual ? "$VISUAL does not point to an executable" : "$EDITOR does not point to an executable";
+}
+
 const char* ffDetectEditor(FFEditorResult* result) {
+    bool isVisual = true;
     ffStrbufSetS(&result->name, getenv("VISUAL"));
-    if (result->name.length) {
-        result->type = "Visual";
-    } else {
+    if (!result->name.length) {
+        isVisual = false;
         ffStrbufSetS(&result->name, getenv("EDITOR"));
-        if (result->name.length) {
-            result->type = "Editor";
-        } else {
-            return "$VISUAL or $EDITOR not set";
-        }
+    }
+
+    if (!result->name.length) {
+        return "$VISUAL or $EDITOR not set";
+    }
+    result->type = isVisual ? "Visual" : "Editor";
+
+    // `$VISUAL`/`$EDITOR` hold a shell command line rather than a bare name, so they routinely
+    // carry arguments: `EDITOR="code -w"`, `EDITOR="vim -f"`. Only the first word names the
+    // program. The whole string used to be handed to `ffFindExecutableInPath()`, which could never
+    // match it, and the module then printed the unparsed value as if it had been resolved.
+    ffStrbufSubstrBefore(&result->name, (uint32_t) strcspn(result->name.chars, " \t\n\v\f\r"));
+
+    if (result->name.length == 0) {
+        return notAnExecutable(isVisual);
     }
 
     if (ffIsAbsolutePath(result->name.chars)) {
@@ -50,14 +66,19 @@ const char* ffDetectEditor(FFEditorResult* result) {
     } else {
         const char* error = ffFindExecutableInPath(result->name.chars, &result->path);
         if (error) {
-            return NULL;
+            // Reporting success here is what made `EDITOR="code -w"` print the raw value: the module
+            // reads `nullptr` as "detection succeeded" and then falls back to printing `name`.
+            return notAnExecutable(isVisual);
         }
     }
 
     {
         char buf[PATH_MAX + 1];
         if (!realpath(result->path.chars, buf)) {
-            return NULL;
+            // An absolute `$VISUAL`/`$EDITOR` is copied into `path` before it is verified, so a path
+            // that does not exist has to be reported here instead of being handed to the caller as
+            // if it had been checked.
+            return notAnExecutable(isVisual);
         }
 
         // WIN32: Should we handle scoop shim exe here?
@@ -77,11 +98,13 @@ const char* ffDetectEditor(FFEditorResult* result) {
 #endif
         );
         if (index == result->path.length) {
-            return NULL;
+            // `realpath()` always yields an absolute path, so neither of these two is reachable in
+            // practice. They used to `return nullptr`, which the module read as a success.
+            return "Failed to determine the executable name";
         }
         ffStrbufSetS(&result->exe, &result->path.chars[index + 1]);
         if (!result->exe.length) {
-            return NULL;
+            return "Failed to determine the executable name";
         }
 
 #ifdef _WIN32
@@ -92,7 +115,8 @@ const char* ffDetectEditor(FFEditorResult* result) {
     }
 
     if (!instance.config.general.detectVersion) {
-        return NULL;
+        // Not an error: the editor was found, version probing was just turned off.
+        return nullptr;
     }
 
     if (ffStrbufEqualS(&result->exe, "nvim")) {
@@ -104,10 +128,10 @@ const char* ffDetectEditor(FFEditorResult* result) {
     }
 
     if (result->version.length > 0) {
-        return NULL;
+        return nullptr;
     }
 
-    const char* param = NULL;
+    const char* param = nullptr;
     if (
         ffStrbufEqualS(&result->exe, "nano") ||
         ffStrbufEqualS(&result->exe, "vim") ||
@@ -130,24 +154,24 @@ const char* ffDetectEditor(FFEditorResult* result) {
         ffStrbufEqualS(&result->exe, "ne")) {
         param = "-h";
     } else {
-        return NULL;
+        return nullptr;
     }
 
     ffProcessAppendStdOut(&result->version, (char* const[]) {
                                                 result->path.chars,
                                                 (char*) param,
-                                                NULL,
+                                                nullptr,
                                             });
 
     if (result->version.length == 0) {
-        return NULL;
+        return nullptr;
     }
 
     ffStrbufSubstrBeforeFirstC(&result->version, '\n');
     const char* versionStart = strpbrk(result->version.chars, "0123456789");
-    if (versionStart != NULL) {
+    if (versionStart != nullptr) {
         const char* versionEnd = strpbrk(versionStart, " \t\v\f\r");
-        if (versionEnd != NULL) {
+        if (versionEnd != nullptr) {
             ffStrbufSubstrBefore(&result->version, (uint32_t) (versionEnd - result->version.chars));
         }
 
@@ -156,5 +180,5 @@ const char* ffDetectEditor(FFEditorResult* result) {
         }
     }
 
-    return NULL;
+    return nullptr;
 }

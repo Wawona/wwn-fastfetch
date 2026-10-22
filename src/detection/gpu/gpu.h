@@ -64,6 +64,9 @@ typedef struct FFGPUResult {
     uint64_t deviceId;
 } FFGPUResult;
 
+static_assert(sizeof(((FFGPUResult*) nullptr)->pcieSpeed) == 8, "pcieSpeed is not 8 bytes");
+static_assert(sizeof(((FFGPUResult*) nullptr)->psMax) == 4, "psMax has padding");
+
 const char* ffDetectGPU(const FFGPUOptions* options, FFlist* result);
 const char* ffDetectGPUImpl(const FFGPUOptions* options, FFlist* gpus);
 
@@ -77,6 +80,8 @@ typedef struct FFGpuDriverPciBusId {
 } FFGpuDriverPciBusId;
 
 #if defined(__linux__) || defined(__FreeBSD__) || defined(__sun) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__HAIKU__) || defined(__GNU__)
+#define FF_GPU_HAS_PCI_IDS 1
+void ffGPUParsePciIdsFile(const FFstrbuf* content, uint8_t subclass, uint16_t vendor, uint16_t device, FFGPUResult* gpu);
 void ffGPUFillVendorAndName(uint8_t subclass, uint16_t vendor, uint16_t device, FFGPUResult* gpu);
 void ffGPUQueryAmdGpuName(uint16_t deviceId, uint8_t revisionId, FFGPUResult* gpu);
 
@@ -104,4 +109,4 @@ static inline uint64_t ffGPUGeneral2Id(uint64_t originalId) {
     return (1ULL << 63) | originalId;
 }
 
-bool ffGPUFillVendorByDeviceName(FFGPUResult* gpu);
+bool ffGPUDetectTypeByVendorAndName(FFGPUResult* gpu);

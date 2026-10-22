@@ -1,11 +1,14 @@
 #include "tpm.h"
+#include "common/debug.h"
 #include "common/io.h"
 
 const char* ffDetectTPM(FFTPMResult* result) {
     if (!ffPathExists("/sys/class/tpm/tpm0/", FF_PATHTYPE_DIRECTORY)) {
         if (!ffPathExists("/sys/class/tpm/", FF_PATHTYPE_DIRECTORY)) {
+            FF_DEBUG("/sys/class/tpm/ does not exist, the kernel has no TPM support");
             return "TPM is not supported by kernel";
         }
+        FF_DEBUG("/sys/class/tpm/ exists but /sys/class/tpm/tpm0/ does not");
         return "TPM device is not found";
     }
 
@@ -20,5 +23,5 @@ const char* ffDetectTPM(FFTPMResult* result) {
         ffStrbufTrimRightSpace(&result->description);
     }
 
-    return NULL;
+    return nullptr;
 }

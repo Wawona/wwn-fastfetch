@@ -45,7 +45,7 @@ static const char* detectWithWmi(FFlist* result) {
         0xd43412ac, 0x67f9, 0x4fbb, { 0xa0, 0x81, 0x17, 0x52, 0xa2, 0xc3, 0x3e, 0x84 }
     };
 
-    FF_AUTO_CLOSE_WMI_BLOCK HANDLE hBlock = NULL;
+    [[gnu::cleanup(ffCloseWmiBlock)]] HANDLE hBlock = nullptr;
 
     ULONG status = WmiOpenBlock(&WmiMonitorBrightnessGuid, WMIGUID_QUERY, &hBlock);
     if (status != 0) {
@@ -54,7 +54,7 @@ static const char* detectWithWmi(FFlist* result) {
     }
 
     ULONG bufferSize = 0;
-    status = WmiQueryAllDataW(hBlock, &bufferSize, NULL);
+    status = WmiQueryAllDataW(hBlock, &bufferSize, nullptr);
     if (status != ERROR_SUCCESS && status != ERROR_INSUFFICIENT_BUFFER) {
         FF_DEBUG("WMI: first WmiQueryAllDataW failed, bufferSize=%lu: %s", bufferSize, ffDebugWin32Error(status));
         return "WmiQueryAllDataW() failed";
@@ -121,7 +121,7 @@ static const char* detectWithWmi(FFlist* result) {
 
     FF_DEBUG("WMI: finished detection, total results=%u", result->length);
 
-    return NULL;
+    return nullptr;
 }
 
 static const char* detectWithDdcci(const FFDisplayServerResult* displayServer, FFlist* result) {
@@ -159,7 +159,8 @@ static const char* detectWithDdcci(const FFDisplayServerResult* displayServer, F
         NTSTATUS monitorStatus = ffGetPhysicalMonitors(&deviceName, 1, &monitorCount, &physicalMonitor);
         if (NT_SUCCESS(monitorStatus) && monitorCount >= 1) {
             DWORD curr = 0, max = 0;
-            if (NT_SUCCESS(ffDDCCIGetVCPFeature(physicalMonitor, FF_DDC_CI_LUMINANCE_OPCODE, NULL, &curr, &max))) {
+            monitorStatus = ffDDCCIGetVCPFeature(physicalMonitor, FF_DDC_CI_LUMINANCE_OPCODE, nullptr, &curr, &max);
+            if (NT_SUCCESS(monitorStatus)) {
                 FFBrightnessResult* brightness = FF_LIST_ADD(FFBrightnessResult, *result);
                 if (display->name.length > 0) {
                     ffStrbufInitCopy(&brightness->name, &display->name);
@@ -167,8 +168,11 @@ static const char* detectWithDdcci(const FFDisplayServerResult* displayServer, F
                     FF_LIBRARY_LOAD_SYMBOL_LAZY(gdi32, GetPhysicalMonitorDescription)
                     if (ffGetPhysicalMonitorDescription) {
                         wchar_t description[128 /*MUST be PHYSICAL_MONITOR_DESCRIPTION_SIZE*/];
-                        if (NT_SUCCESS(ffGetPhysicalMonitorDescription(physicalMonitor, ARRAY_SIZE(description), description))) {
+                        monitorStatus = ffGetPhysicalMonitorDescription(physicalMonitor, ARRAY_SIZE(description), description);
+                        if (NT_SUCCESS(monitorStatus)) {
                             ffStrbufInitWS(&brightness->name, description);
+                        } else {
+                            FF_DEBUG("DDC/CI: GetPhysicalMonitorDescription failed for monitor '%ls': %s", deviceName.Buffer, ffDebugNtStatus(monitorStatus));
                         }
                     }
                     if (brightness->name.length == 0) {
@@ -182,7 +186,7 @@ static const char* detectWithDdcci(const FFDisplayServerResult* displayServer, F
 
                 FF_DEBUG("DDC/CI: detected external display '%s', current=%u, max=%u", brightness->name.chars, (unsigned) curr, (unsigned) max);
             } else {
-                FF_DEBUG("DDC/CI: DDCCIGetVCPFeature failed for monitor '%ls': %s", deviceName.Buffer, ffDebugWin32Error(GetLastError()));
+                FF_DEBUG("DDC/CI: DDCCIGetVCPFeature failed for monitor '%ls': %s", deviceName.Buffer, ffDebugNtStatus(monitorStatus));
             }
 
             ffDestroyPhysicalMonitorInternal(physicalMonitor);
@@ -192,7 +196,7 @@ static const char* detectWithDdcci(const FFDisplayServerResult* displayServer, F
     }
 
     FF_DEBUG("DDC/CI: finished detection, total results=%u", result->length);
-    return NULL;
+    return nullptr;
 }
 
 static bool hasBuiltinDisplay(const FFDisplayServerResult* displayServer) {
@@ -204,7 +208,7 @@ static bool hasBuiltinDisplay(const FFDisplayServerResult* displayServer) {
     return false;
 }
 
-const char* ffDetectBrightness(FF_A_UNUSED FFBrightnessOptions* options, FFlist* result) {
+const char* ffDetectBrightness([[maybe_unused]] FFBrightnessOptions* options, FFlist* result) {
     const FFDisplayServerResult* displayServer = ffConnectDisplayServer();
     FF_DEBUG("start, displayCount=%u", displayServer->displays.length);
 
@@ -219,5 +223,5 @@ const char* ffDetectBrightness(FF_A_UNUSED FFBrightnessOptions* options, FFlist*
     }
 
     FF_DEBUG("finished, resultCount=%u", result->length);
-    return NULL;
+    return nullptr;
 }

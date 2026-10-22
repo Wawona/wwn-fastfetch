@@ -42,7 +42,7 @@ HANDLE ffRegGetRootKeyHandle(HKEY hKey) {
             NTSTATUS status = RtlOpenCurrentUser(KEY_READ, &result);
             if (!NT_SUCCESS(status)) {
                 FF_DEBUG("RtlOpenCurrentUser() failed: %s", ffDebugNtStatus(status));
-                return NULL;
+                return nullptr;
             }
             break;
         }
@@ -51,13 +51,13 @@ HANDLE ffRegGetRootKeyHandle(HKEY hKey) {
             UNICODE_STRING path = RTL_CONSTANT_STRING(L"\\Registry\\Machine");
             NTSTATUS status = NtOpenKey(&result, KEY_READ, &(OBJECT_ATTRIBUTES) {
                                                                .Length = sizeof(OBJECT_ATTRIBUTES),
-                                                               .RootDirectory = NULL,
+                                                               .RootDirectory = nullptr,
                                                                .ObjectName = &path,
                                                                .Attributes = OBJ_CASE_INSENSITIVE,
                                                            });
             if (!NT_SUCCESS(status)) {
                 FF_DEBUG("NtOpenKey(%ls) failed: %s (0x%08lx)", path.Buffer, ffDebugNtStatus(status), status);
-                return NULL;
+                return nullptr;
             }
             break;
         }
@@ -65,7 +65,7 @@ HANDLE ffRegGetRootKeyHandle(HKEY hKey) {
             // Unsupported
             FF_DEBUG("Unsupported root key: %p", hKey);
             assert(false);
-            return NULL;
+            return nullptr;
     }
     hRootKeys[(uintptr_t) hKey - (uintptr_t) HKEY_CLASSES_ROOT] = result;
     FF_DEBUG("Opened root key %s -> %p", hKey2Str(result), result);
@@ -241,7 +241,7 @@ bool ffRegReadValue(HANDLE hKey, const FFRegValueArg* arg, FFstrbuf* error) {
     };
 
     alignas(KEY_VALUE_PARTIAL_INFORMATION) uint8_t staticBuffer[128 + sizeof(KEY_VALUE_PARTIAL_INFORMATION)];
-    FF_AUTO_FREE uint8_t* dynamicBuffer = NULL;
+    FF_AUTO_FREE uint8_t* dynamicBuffer = nullptr;
 
     KEY_VALUE_PARTIAL_INFORMATION* buffer = (KEY_VALUE_PARTIAL_INFORMATION*) &staticBuffer;
     DWORD bufSize = sizeof(staticBuffer);
@@ -287,9 +287,9 @@ bool ffRegReadValues(HANDLE hKey, uint32_t argc, const FFRegValueArg argv[], FFs
 
     for (uint32_t i = 0; i < argc; ++i) {
         if (__builtin_expect(!argv[i].value, false)) {
-            FF_DEBUG("ffRegReadValues(argv[%u].value) is NULL", (unsigned) i);
+            FF_DEBUG("ffRegReadValues(argv[%u].value) is nullptr", (unsigned) i);
             if (error) {
-                ffStrbufAppendF(error, "ffRegReadValues(argv[%u].pVar) is NULL", (unsigned) i);
+                ffStrbufAppendF(error, "ffRegReadValues(argv[%u].pVar) is nullptr", (unsigned) i);
             }
             return false;
         }
@@ -307,7 +307,7 @@ bool ffRegReadValues(HANDLE hKey, uint32_t argc, const FFRegValueArg argv[], FFs
         bufferSize = 512;
     }
 
-    FF_AUTO_FREE uint8_t* buffer = NULL;
+    FF_AUTO_FREE uint8_t* buffer = nullptr;
 
     while (true) {
         buffer = (uint8_t*) realloc(buffer, bufferSize);
@@ -355,6 +355,10 @@ bool ffRegGetSubKey(HANDLE hKey, uint32_t index, FFstrbuf* result, FFstrbuf* err
     ULONG bufSize = (ULONG) sizeof(buffer);
     KEY_BASIC_INFORMATION* keyInfo = (KEY_BASIC_INFORMATION*) buffer;
 
+    // Every failure mode fails NT_SUCCESS, and the read below depends on that: on a too-small buffer
+    // the kernel returns STATUS_BUFFER_OVERFLOW, writes the *full* NameLength but copies only part of
+    // the name (measured), so treating that status as success would read past what was written.
+    // The longest name the CM accepts, 255 characters, still fits: 255 * 2 + 16 <= sizeof(buffer).
     if (!NT_SUCCESS(NtEnumerateKey(hKey, index, KeyBasicInformation, keyInfo, bufSize, &bufSize))) {
         FF_DEBUG("NtEnumerateKey(hKey=%p, index=%u) failed", hKey, (unsigned) index);
         if (error) {
@@ -367,22 +371,26 @@ bool ffRegGetSubKey(HANDLE hKey, uint32_t index, FFstrbuf* result, FFstrbuf* err
     return true;
 }
 
-bool ffRegGetNSubKeys(HANDLE hKey, uint32_t* result, FFstrbuf* error) {
+// Reads the counters the key object already caches. KeyFullInformation would return the same numbers
+// but also marshals the key's class string out; measured per query on the ARP and MSIX keys:
+// 837 ns vs 895 ns (interleaved, 200k queries each). The open dominates the total -- 22.10 us vs
+// 22.40 us for open + query -- so this is a small win, not a big one.
+//
+// The kernel writes exactly sizeof(KEY_CACHED_INFORMATION) bytes and rejects a smaller buffer with
+// STATUS_BUFFER_TOO_SMALL without writing anything, so pass a whole KEY_CACHED_INFORMATION.
+bool ffRegQueryKey(HANDLE hKey, KEY_CACHED_INFORMATION* result, FFstrbuf* error) {
     assert(hKey);
     assert(result);
 
-    alignas(KEY_FULL_INFORMATION) uint8_t buffer[sizeof(KEY_FULL_INFORMATION) + MAX_PATH * sizeof(wchar_t)];
-    ULONG bufSize = sizeof(buffer);
-    KEY_FULL_INFORMATION* keyInfo = (KEY_FULL_INFORMATION*) buffer;
+    ULONG bufSize = (ULONG) sizeof(*result);
 
-    if (!NT_SUCCESS(NtQueryKey(hKey, KeyFullInformation, keyInfo, bufSize, &bufSize))) {
-        FF_DEBUG("NtQueryKey(hKey=%p, KeyFullInformation) failed", hKey);
+    if (!NT_SUCCESS(NtQueryKey(hKey, KeyCachedInformation, result, bufSize, &bufSize))) {
+        FF_DEBUG("NtQueryKey(hKey=%p, KeyCachedInformation) failed", hKey);
         if (error) {
-            ffStrbufAppendF(error, "NtQueryKey(hKey=%p, KeyFullInformation, keyInfo) failed", hKey);
+            ffStrbufAppendF(error, "NtQueryKey(hKey=%p, KeyCachedInformation, keyInfo) failed", hKey);
         }
         return false;
     }
 
-    *result = (uint32_t) keyInfo->SubKeys;
     return true;
 }

@@ -1,4 +1,5 @@
 #include "netio.h"
+#include "common/debug.h"
 #include "common/netif.h"
 #include "common/strutil.h"
 
@@ -12,8 +13,9 @@ static inline void kstatFreeWrap(kstat_ctl_t** pkc) {
 }
 
 const char* ffNetIOGetIoCounters(FFlist* result, FFNetIOOptions* options) {
-    FF_A_CLEANUP(kstatFreeWrap) kstat_ctl_t* kc = kstat_open();
+    [[gnu::cleanup(kstatFreeWrap)]] kstat_ctl_t* kc = kstat_open();
     if (!kc) {
+        FF_DEBUG("kstat_open() failed");
         return "kstat_open() failed";
     }
 
@@ -33,7 +35,7 @@ const char* ffNetIOGetIoCounters(FFlist* result, FFNetIOOptions* options) {
             continue;
         }
 
-        if (kstat_read(kc, ks, NULL) < 0) {
+        if (kstat_read(kc, ks, nullptr) < 0) {
             continue;
         }
 
@@ -64,5 +66,5 @@ const char* ffNetIOGetIoCounters(FFlist* result, FFNetIOOptions* options) {
         }
     }
 
-    return NULL;
+    return nullptr;
 }

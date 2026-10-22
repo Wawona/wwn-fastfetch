@@ -15,24 +15,24 @@ static const char* getSystemMonospaceFont(void) {
     const FFDisplayServerResult* wmde = ffConnectDisplayServer();
 
     if (ffStrbufIgnCaseEqualS(&wmde->dePrettyName, "Cinnamon")) {
-        const char* systemMonospaceFont = ffSettingsGetGnome("/org/cinnamon/desktop/interface/monospace-font-name", "org.cinnamon.desktop.interface", NULL, "monospace-font-name", FF_VARIANT_TYPE_STRING).strValue;
+        const char* systemMonospaceFont = ffSettingsGetGnome("/org/cinnamon/desktop/interface/monospace-font-name", "org.cinnamon.desktop.interface", nullptr, "monospace-font-name", FF_VARIANT_TYPE_STRING).strValue;
         if (ffStrSet(systemMonospaceFont)) {
             return systemMonospaceFont;
         }
     } else if (ffStrbufIgnCaseEqualS(&wmde->dePrettyName, "Mate")) {
-        const char* systemMonospaceFont = ffSettingsGetGnome("/org/mate/interface/monospace-font-name", "org.mate.interface", NULL, "monospace-font-name", FF_VARIANT_TYPE_STRING).strValue;
+        const char* systemMonospaceFont = ffSettingsGetGnome("/org/mate/interface/monospace-font-name", "org.mate.interface", nullptr, "monospace-font-name", FF_VARIANT_TYPE_STRING).strValue;
         if (ffStrSet(systemMonospaceFont)) {
             return systemMonospaceFont;
         }
     }
 
-    return ffSettingsGetGnome("/org/gnome/desktop/interface/monospace-font-name", "org.gnome.desktop.interface", NULL, "monospace-font-name", FF_VARIANT_TYPE_STRING).strValue;
+    return ffSettingsGetGnome("/org/gnome/desktop/interface/monospace-font-name", "org.gnome.desktop.interface", nullptr, "monospace-font-name", FF_VARIANT_TYPE_STRING).strValue;
 }
 
 static void detectKgx(FFTerminalFontResult* terminalFont) {
     // kgx (gnome console) doesn't support profiles
-    if (!ffSettingsGetGnome("/org/gnome/Console/use-system-font", "org.gnome.Console", NULL, "use-system-font", FF_VARIANT_TYPE_BOOL).boolValue) {
-        FF_AUTO_FREE const char* fontName = ffSettingsGetGnome("/org/gnome/Console/custom-font", "org.gnome.Console", NULL, "custom-font", FF_VARIANT_TYPE_STRING).strValue;
+    if (!ffSettingsGetGnome("/org/gnome/Console/use-system-font", "org.gnome.Console", nullptr, "use-system-font", FF_VARIANT_TYPE_BOOL).boolValue) {
+        FF_AUTO_FREE const char* fontName = ffSettingsGetGnome("/org/gnome/Console/custom-font", "org.gnome.Console", nullptr, "custom-font", FF_VARIANT_TYPE_STRING).strValue;
         if (ffStrSet(fontName)) {
             ffFontInitPango(&terminalFont->font, fontName);
         } else {
@@ -49,8 +49,8 @@ static void detectKgx(FFTerminalFontResult* terminalFont) {
 }
 
 static void detectPtyxis(FFTerminalFontResult* terminalFont) {
-    if (!ffSettingsGetGnome("/org/gnome/Ptyxis/use-system-font", "org.gnome.Ptyxis", NULL, "use-system-font", FF_VARIANT_TYPE_BOOL).boolValue) {
-        FF_AUTO_FREE const char* fontName = ffSettingsGetGnome("/org/gnome/Ptyxis/font-name", "org.gnome.Ptyxis", NULL, "font-name", FF_VARIANT_TYPE_STRING).strValue;
+    if (!ffSettingsGetGnome("/org/gnome/Ptyxis/use-system-font", "org.gnome.Ptyxis", nullptr, "use-system-font", FF_VARIANT_TYPE_BOOL).boolValue) {
+        FF_AUTO_FREE const char* fontName = ffSettingsGetGnome("/org/gnome/Ptyxis/font-name", "org.gnome.Ptyxis", nullptr, "font-name", FF_VARIANT_TYPE_STRING).strValue;
         if (ffStrSet(fontName)) {
             ffFontInitPango(&terminalFont->font, fontName);
         } else {
@@ -67,7 +67,7 @@ static void detectPtyxis(FFTerminalFontResult* terminalFont) {
 }
 
 static void detectFromGSettings(const char* profilePath, const char* profileList, const char* profile, const char* defaultProfileKey, FFTerminalFontResult* terminalFont) {
-    FF_AUTO_FREE const char* defaultProfile = ffSettingsGetGSettings(profileList, NULL, defaultProfileKey, FF_VARIANT_TYPE_STRING).strValue;
+    FF_AUTO_FREE const char* defaultProfile = ffSettingsGetGSettings(profileList, nullptr, defaultProfileKey, FF_VARIANT_TYPE_STRING).strValue;
     if (!ffStrSet(defaultProfile)) {
         ffStrbufAppendF(&terminalFont->error, "Could not get default profile from gsettings: %s", profileList);
         return;
@@ -169,10 +169,10 @@ static void detectDeepinTerminal(FFTerminalFontResult* terminalFont) {
 
     FF_STRBUF_AUTO_DESTROY profile = ffStrbufCreateA(64);
     ffSearchUserConfigFile(&instance.state.platform.configDirs, "deepin/deepin-terminal/config.conf", &profile);
-    FILE* file = fopen(profile.chars, "r");
+    FF_AUTO_CLOSE_FILE FILE* file = fopen(profile.chars, "r");
 
     if (file) {
-        char* line = NULL;
+        FF_AUTO_FREE char* line = nullptr;
         size_t len = 0;
 
         for (int count = 0; getline(&line, &len, file) != -1 && count < 2;) {
@@ -188,9 +188,6 @@ static void detectDeepinTerminal(FFTerminalFontResult* terminalFont) {
                 ++count;
             }
         }
-
-        free(line);
-        fclose(file);
     }
 
     if (fontName.length == 0) {
@@ -211,27 +208,17 @@ static void detectFootTerminal(FFTerminalFontResult* terminalFont) {
         return;
     }
 
-    // Sarasa Term SC Nerd:size=8
-    uint32_t colon = ffStrbufFirstIndexC(&font, ':');
-    if (colon == font.length) {
-        ffFontInitValues(&terminalFont->font, font.chars, "8");
-        return;
-    }
-    uint32_t equal = ffStrbufNextIndexS(&font, colon, "size=");
-    font.chars[colon] = '\0';
-    if (equal == font.length) {
-        ffFontInitValues(&terminalFont->font, font.chars, "8");
-        return;
-    }
-    uint32_t size = equal + (uint32_t) strlen("size=");
-    uint32_t comma = ffStrbufNextIndexC(&font, size, ',');
-    if (comma < font.length) {
+    // foot splits the font list on commas to specify fallback fonts.
+    // Each entry is a fontconfig pattern, e.g. "Berkeley Mono-12" or "Sarasa Term SC Nerd:size=8".
+    uint32_t comma = ffStrbufFirstIndexC(&font, ',');
+    if (comma != font.length) {
+        if (comma + 1 < font.length) {
+            ffFontInitXft(&terminalFont->fallback, &font.chars[comma + 1]);
+        }
         font.chars[comma] = '\0';
+        ffStrbufRecalculateLength(&font);
     }
-    ffFontInitValues(&terminalFont->font, font.chars, &font.chars[size]);
-    if (comma < font.length) {
-        ffFontInitValues(&terminalFont->fallback, &font.chars[comma + 1], NULL);
-    }
+    ffFontInitXft(&terminalFont->font, font.chars);
 }
 
 static void detectQTerminal(FFTerminalFontResult* terminalFont) {
@@ -277,7 +264,7 @@ static void detectXterm(FFTerminalFontResult* terminalFont) {
     ffFontInitValues(&terminalFont->font, fontName.chars, fontSize.chars);
 }
 
-static bool extractStTermFont(const char* str, FF_A_UNUSED uint32_t len, void* userdata) {
+static bool extractStTermFont(const char* str, [[maybe_unused]] uint32_t len, void* userdata) {
     if (!ffStrContains(str, "size=")) {
         return true;
     }
@@ -312,21 +299,8 @@ static void detectSt(FFTerminalFontResult* terminalFont, const FFTerminalResult*
         }
     }
 
-    // JetBrainsMono Nerd Font Mono:pixelsize=12:antialias=true:autohint=true
-
-    uint32_t index = ffStrbufFirstIndexC(&font, ':');
-    if (index != font.length) {
-        uint32_t sIndex = ffStrbufNextIndexS(&font, index + 1, "size=");
-        if (sIndex != font.length) {
-            sIndex += (uint32_t) strlen("size=");
-            uint32_t sIndexEnd = ffStrbufNextIndexC(&font, sIndex, ':');
-            ffStrbufSetNS(&size, sIndexEnd - sIndex, font.chars + sIndex);
-        }
-        ffStrbufSubstrBefore(&font, index);
-    } else {
-        ffStrbufClear(&size);
-    }
-    ffFontInitValues(&terminalFont->font, font.chars, size.chars);
+    // e.g. "JetBrainsMono Nerd Font Mono:pixelsize=12:antialias=true:autohint=true"
+    ffFontInitXft(&terminalFont->font, font.chars);
 }
 
 static void detectWarp(FFTerminalFontResult* terminalFont) {
@@ -337,7 +311,7 @@ static void detectWarp(FFTerminalFontResult* terminalFont) {
         ffStrbufSet(&baseDir, dirPrefix);
         ffStrbufAppendS(&baseDir, "warp-terminal/user_preferences.json");
 
-        yyjson_doc* doc = yyjson_read_file(baseDir.chars, YYJSON_READ_INSITU | YYJSON_READ_ALLOW_TRAILING_COMMAS | YYJSON_READ_ALLOW_COMMENTS, NULL, NULL);
+        yyjson_doc* doc = yyjson_read_file(baseDir.chars, YYJSON_READ_INSITU | YYJSON_READ_ALLOW_TRAILING_COMMAS | YYJSON_READ_ALLOW_COMMENTS, nullptr, nullptr);
         if (!doc) {
             continue;
         }
@@ -434,7 +408,7 @@ static void detectUrxvt(FFTerminalFontResult* terminalFont) {
 
     uint32_t index = 0;
 
-    char* line = NULL;
+    char* line = nullptr;
     size_t len = 0;
     while (ffStrbufGetdelim(&line, &len, ',', &buffer)) {
         FFfont* font = index == 0 ? &terminalFont->font : &terminalFont->fallback;

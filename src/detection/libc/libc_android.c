@@ -1,4 +1,5 @@
 #include "libc.h"
+#include "common/debug.h"
 #include "common/strutil.h"
 
 #include <features.h>
@@ -15,8 +16,9 @@ const char* ffDetectLibc(FFLibcResult* result) {
     #endif
 
         ;
-    return NULL;
+    return nullptr;
 #else
+    FF_DEBUG("Unknown Android libc");
     return "Unknown Android libc";
 #endif
 }

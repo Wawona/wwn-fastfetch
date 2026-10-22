@@ -10,9 +10,9 @@ static void printBtrfs(FFBtrfsOptions* options, FFBtrfsResult* result, uint8_t i
     FF_STRBUF_AUTO_DESTROY buffer = ffStrbufCreate();
     if (options->moduleArgs.key.length == 0) {
         if (result->name.length > 0) {
-            ffStrbufSetF(&buffer, "%s (%s)", FF_BTRFS_MODULE_NAME, result->name.chars);
+            ffStrbufSetF(&buffer, "%s (%s)", FF_MODULE_GET_DISPLAY_NAME(Btrfs), result->name.chars);
         } else {
-            ffStrbufSetS(&buffer, FF_BTRFS_MODULE_NAME);
+            ffStrbufSetS(&buffer, FF_MODULE_GET_DISPLAY_NAME(Btrfs));
         }
     } else {
         ffStrbufClear(&buffer);
@@ -20,6 +20,7 @@ static void printBtrfs(FFBtrfsOptions* options, FFBtrfsResult* result, uint8_t i
                                                                               FF_ARG(index, "index"),
                                                                               FF_ARG(result->name, "name"),
                                                                               FF_ARG(options->moduleArgs.keyIcon, "icon"),
+                                                                              FF_ARG(FF_MODULE_GET_DISPLAY_NAME(Btrfs), "module-name"),
                                                                           }));
     }
 
@@ -100,11 +101,11 @@ bool ffPrintBtrfs(FFBtrfsOptions* options) {
     const char* error = ffDetectBtrfs(&results);
 
     if (error) {
-        ffPrintError(FF_BTRFS_MODULE_NAME, 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "%s", error);
+        ffPrintError(FF_MODULE_GET_DISPLAY_NAME(Btrfs), 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "%s", error);
         return false;
     }
     if (results.length == 0) {
-        ffPrintError(FF_BTRFS_MODULE_NAME, 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "%s", "No btrfs drive found");
+        ffPrintError(FF_MODULE_GET_DISPLAY_NAME(Btrfs), 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "%s", "No btrfs drive found");
         return false;
     }
 
@@ -136,17 +137,18 @@ void ffParseBtrfsJsonObject(FFBtrfsOptions* options, yyjson_val* module) {
             continue;
         }
 
-        ffPrintError(FF_BTRFS_MODULE_NAME, 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "Unknown JSON key %s", unsafe_yyjson_get_str(key));
+        ffPrintError(FF_MODULE_GET_DISPLAY_NAME(Btrfs), 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "Unknown JSON key %s", unsafe_yyjson_get_str(key));
     }
 }
 
+[[gnu::cold]]
 void ffGenerateBtrfsJsonConfig(FFBtrfsOptions* options, yyjson_mut_doc* doc, yyjson_mut_val* module) {
     ffJsonConfigGenerateModuleArgsConfig(doc, module, &options->moduleArgs);
 
     ffPercentGenerateJsonConfig(doc, module, options->percent);
 }
 
-bool ffGenerateBtrfsJsonResult(FF_A_UNUSED FFBtrfsOptions* options, yyjson_mut_doc* doc, yyjson_mut_val* module) {
+bool ffGenerateBtrfsJsonResult([[maybe_unused]] FFBtrfsOptions* options, yyjson_mut_doc* doc, yyjson_mut_val* module) {
     FF_LIST_AUTO_DESTROY results = ffListCreate();
 
     const char* error = ffDetectBtrfs(&results);
@@ -167,6 +169,9 @@ bool ffGenerateBtrfsJsonResult(FF_A_UNUSED FFBtrfsOptions* options, yyjson_mut_d
         yyjson_mut_obj_add_uint(doc, obj, "nodeSize", btrfs->nodeSize);
         yyjson_mut_obj_add_uint(doc, obj, "sectorSize", btrfs->sectorSize);
         yyjson_mut_obj_add_uint(doc, obj, "totalSize", btrfs->totalSize);
+        yyjson_mut_val* globalReservation = yyjson_mut_obj_add_obj(doc, obj, "globalReservation");
+        yyjson_mut_obj_add_uint(doc, globalReservation, "used", btrfs->globalReservationUsed);
+        yyjson_mut_obj_add_uint(doc, globalReservation, "total", btrfs->globalReservationTotal);
         yyjson_mut_val* allocation = yyjson_mut_obj_add_arr(doc, obj, "allocation");
         for (uint32_t i = 0; i < ARRAY_SIZE(btrfs->allocation); ++i) {
             yyjson_mut_val* item = yyjson_mut_arr_add_obj(doc, allocation);
@@ -198,8 +203,31 @@ void ffDestroyBtrfsOptions(FFBtrfsOptions* options) {
 }
 
 FFModuleBaseInfo ffBtrfsModuleInfo = {
-    .name = FF_BTRFS_MODULE_NAME,
+    .name = "Btrfs",
     .description = "Print Linux BTRFS volumes",
+    .displayName = {
+        .en = "BTRFS",
+        .ar = "BTRFS",
+        .cs = "BTRFS",
+        .de = "BTRFS",
+        .es = "BTRFS",
+        .fi = "BTRFS",
+        .fr = "BTRFS",
+        .gl = "BTRFS",
+        .he = "BTRFS",
+        .id = "BTRFS",
+        .it = "BTRFS",
+        .ja = "BTRFS",
+        .ko = "BTRFS",
+        .pl = "BTRFS",
+        .pt = "BTRFS",
+        .ru = "BTRFS",
+        .tr = "BTRFS",
+        .uk = "BTRFS",
+        .vi = "BTRFS",
+        .zh_CN = "BTRFS",
+        .zh_TW = "BTRFS",
+    },
     .initOptions = (void*) ffInitBtrfsOptions,
     .destroyOptions = (void*) ffDestroyBtrfsOptions,
     .parseJsonObject = (void*) ffParseBtrfsJsonObject,
@@ -207,7 +235,7 @@ FFModuleBaseInfo ffBtrfsModuleInfo = {
     .generateJsonResult = (void*) ffGenerateBtrfsJsonResult,
     .generateJsonConfig = (void*) ffGenerateBtrfsJsonConfig,
     .formatArgs = FF_FORMAT_ARG_LIST(((FFModuleFormatArg[]) {
-        { "Name / Label", "name" },
+        { "Name / Label *", "name" },
         { "UUID", "uuid" },
         { "Associated devices", "devices" },
         { "Enabled features", "features" },
@@ -220,5 +248,6 @@ FFModuleBaseInfo ffBtrfsModuleInfo = {
         { "Allocated percentage bar", "allocated-percentage-bar" },
         { "Node size", "node-size" },
         { "Sector size", "sector-size" },
-    }))
+    })),
+    .defaultOrder = 43,
 };

@@ -1,6 +1,8 @@
 #include "keyboard.h"
+#include "common/debug.h"
 #include "common/io.h"
 
+#include <string.h>
 #include <stdio.h>
 #include <fcntl.h>
 #include <usbhid.h>
@@ -15,6 +17,7 @@
 static const char* detectByIoctl(FFlist* devices) {
     keyboard_info_t kbdInfo;
     if (ioctl(STDIN_FILENO, KDGKBINFO, &kbdInfo) != 0) {
+        FF_DEBUG("ioctl(KDGKBINFO) failed: %s", strerror(errno));
         return "ioctl(KDGKBINFO) failed";
     }
 
@@ -35,7 +38,7 @@ static const char* detectByIoctl(FFlist* devices) {
     ffStrbufAppendF(&device->name, " (kbd%d)", kbdInfo.kb_index);
 
     ffStrbufInit(&device->serial);
-    return NULL;
+    return nullptr;
 }
 
 #define MAX_UHID_KBDS 64
@@ -80,13 +83,13 @@ static const char* detectByUsbhid(FFlist* devices) {
         hid_dispose_report_desc(repDesc);
     }
 
-    return NULL;
+    return nullptr;
 }
 
 const char* ffDetectKeyboard(FFlist* devices /* List of FFKeyboardDevice */) {
     detectByUsbhid(devices);
     if (devices->length > 0) {
-        return NULL;
+        return nullptr;
     }
     return detectByIoctl(devices);
 }

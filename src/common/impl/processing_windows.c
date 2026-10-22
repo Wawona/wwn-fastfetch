@@ -1,4 +1,5 @@
 #include "fastfetch.h"
+#include "common/debug.h"
 #include "common/mallocHelper.h"
 #include "common/processing.h"
 #include "common/io.h"
@@ -15,7 +16,7 @@ static void argvToCmdline(char* const argv[], FFstrbuf* result) {
     // From https://gist.github.com/jin-x/cdd641d98887524b091fb1f82a68717d
 
     FF_STRBUF_AUTO_DESTROY temp = ffStrbufCreate();
-    for (int i = 0; argv[i] != NULL; i++) {
+    for (int i = 0; argv[i] != nullptr; i++) {
         ffStrbufSetS(&temp, argv[i]);
         // Add slash (\) before double quotes (") and duplicate slashes before it
         for (
@@ -28,7 +29,7 @@ static void argvToCmdline(char* const argv[], FFstrbuf* result) {
         }
 
         // Add quotes around string if whitespace chars are present (with slash duplicating at the end of string)
-        if (ffStrbufFirstIndexS(&temp, " \t") != temp.length) {
+        if (ffStrbufContainAnyC(&temp, " \t")) {
             uint32_t pos = temp.length;
             uint32_t cnt = 0;
             while (pos > 0 && temp.chars[pos - 1] == '\\') { ++cnt, --pos; }
@@ -48,7 +49,42 @@ static void argvToCmdline(char* const argv[], FFstrbuf* result) {
     }
 }
 
-const char* ffProcessSpawn(char* const argv[], bool useStdErr, FFProcessHandle* outHandle) {
+static wchar_t* createChildEnvironment(void) {
+    auto pparams = ffGetPeb()->ProcessParameters;
+    const wchar_t* readStart = pparams->Environment;
+
+    if (!readStart) {
+        return nullptr;
+    }
+
+    RtlAcquirePebLock();
+    wchar_t* result = malloc(pparams->EnvironmentSize + sizeof(L"LANG=C.UTF-8"));
+
+    const wchar_t* entry = readStart;
+    wchar_t* writeStart = result;
+
+    // Copy all environment variables except LANG
+    while (*entry) {
+        assert((const uint8_t*) entry <= (const uint8_t*) pparams->Environment + pparams->EnvironmentSize);
+        size_t entryLength = wcslen(entry);
+        if (entryLength >= strlen("LANG=") && memcmp(entry, L"LANG=", strlen("LANG=") * sizeof(wchar_t)) == 0) {
+            memcpy(writeStart, readStart, (size_t) (entry - readStart) * sizeof(wchar_t));
+            writeStart += (size_t) (entry - readStart);
+            readStart = entry + entryLength + 1;
+        }
+        entry += entryLength + 1;
+    }
+    // Copy the remaining environment variables
+    memcpy(writeStart, readStart, (size_t) (entry - readStart) * sizeof(wchar_t));
+    writeStart += (size_t) (entry - readStart);
+    // Add LANG=C.UTF-8 and double null terminator
+    memcpy(writeStart, L"LANG=C.UTF-8\0", sizeof(L"LANG=C.UTF-8\0"));
+
+    RtlReleasePebLock();
+    return result;
+}
+
+const char* ffProcessSpawn(char* const argv[], FFProcessOutputType useOutput, FFNativeFD stdinFd, FFProcessHandle* outHandle) {
     const int32_t timeout = instance.config.general.processingTimeout;
 
     wchar_t pipeName[32];
@@ -63,8 +99,9 @@ const char* ffProcessSpawn(char* const argv[], bool useStdErr, FFProcessHandle* 
         FF_PIPE_BUFSIZ,
         FF_PIPE_BUFSIZ,
         0,
-        NULL);
+        nullptr);
     if (hChildPipeRead == INVALID_HANDLE_VALUE) {
+        FF_DEBUG("CreateNamedPipeW() failed: %s", ffDebugWin32Error(GetLastError()));
         return "CreateNamedPipeW(L\"\\\\.\\pipe\\FASTFETCH-$(PID)\") failed";
     }
 
@@ -74,13 +111,14 @@ const char* ffProcessSpawn(char* const argv[], bool useStdErr, FFProcessHandle* 
         0,
         &(SECURITY_ATTRIBUTES) {
             .nLength = sizeof(SECURITY_ATTRIBUTES),
-            .lpSecurityDescriptor = NULL,
+            .lpSecurityDescriptor = nullptr,
             .bInheritHandle = TRUE,
         },
         OPEN_EXISTING,
         0,
-        NULL);
+        nullptr);
     if (hChildPipeWrite == INVALID_HANDLE_VALUE) {
+        FF_DEBUG("CreateFileW() failed: %s", ffDebugWin32Error(GetLastError()));
         return "CreateFileW(L\"\\\\.\\pipe\\FASTFETCH-$(PID)\") failed";
     }
 
@@ -89,43 +127,52 @@ const char* ffProcessSpawn(char* const argv[], bool useStdErr, FFProcessHandle* 
         .cb = sizeof(siStartInfo),
         .dwFlags = STARTF_USESTDHANDLES,
     };
-    if (useStdErr) {
-        siStartInfo.hStdOutput = ffGetNullFD();
-        siStartInfo.hStdError = hChildPipeWrite;
-    } else {
-        siStartInfo.hStdOutput = hChildPipeWrite;
-        siStartInfo.hStdError = ffGetNullFD();
+
+    HANDLE nullFile = ffGetNullFD();
+    // A stream wired to the pipe is captured; the other goes to the null device so it cannot mix
+    // into the captured text or fill the pipe and block the child. Both may share the pipe handle.
+    siStartInfo.hStdOutput = (useOutput & FF_PROCESS_OUTPUT_STDOUT_BIT) ? hChildPipeWrite : nullFile;
+    siStartInfo.hStdError = (useOutput & FF_PROCESS_OUTPUT_STDERR_BIT) ? hChildPipeWrite : nullFile;
+    if (ffIsValidNativeFD(stdinFd)) {
+        siStartInfo.hStdInput = stdinFd;
     }
 
-    FF_AUTO_FREE wchar_t* cmdline = NULL;
+    FF_AUTO_FREE wchar_t* cmdline = nullptr;
     {
         FF_STRBUF_AUTO_DESTROY buf = ffStrbufCreate();
         argvToCmdline(argv, &buf);
+        FF_DEBUG("Command line: %s", buf.chars);
         uint32_t cmdlineBytes = (buf.length + 1) * sizeof(wchar_t);
         cmdline = malloc(cmdlineBytes);
-        if (!NT_SUCCESS(RtlUTF8ToUnicodeN(cmdline, cmdlineBytes, NULL, buf.chars, buf.length + 1))) {
+        NTSTATUS status = RtlUTF8ToUnicodeN(cmdline, cmdlineBytes, nullptr, buf.chars, buf.length + 1);
+        if (!NT_SUCCESS(status)) {
+            FF_DEBUG("RtlUTF8ToUnicodeN() failed: %s", ffDebugNtStatus(status));
             return "RtlUTF8ToUnicodeN() failed";
         }
     }
 
+    FF_AUTO_FREE wchar_t* environment = createChildEnvironment();
     BOOL success = CreateProcessW(
-        NULL,         // application name
-        cmdline,      // command line
-        NULL,         // process security attributes
-        NULL,         // primary thread security attributes
-        TRUE,         // handles are inherited
-        0,            // creation flags
-        NULL,         // use parent's environment
-        NULL,         // use parent's current directory
-        &siStartInfo, // STARTUPINFO pointer
-        &piProcInfo   // receives PROCESS_INFORMATION
+        nullptr,                    // application name
+        cmdline,                    // command line
+        nullptr,                    // process security attributes
+        nullptr,                    // primary thread security attributes
+        TRUE,                       // handles are inherited
+        CREATE_UNICODE_ENVIRONMENT, // creation flags
+        environment,                // child environment
+        nullptr,                    // use parent's current directory
+        &siStartInfo,               // STARTUPINFO pointer
+        &piProcInfo                 // receives PROCESS_INFORMATION
     );
 
     NtClose(hChildPipeWrite);
     if (!success) {
-        if (GetLastError() == ERROR_FILE_NOT_FOUND) {
+        DWORD error = GetLastError();
+        if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND) {
+            FF_DEBUG("Command not found: %s (%s)", argv[0], ffDebugWin32Error(error));
             return "command not found";
         }
+        FF_DEBUG("CreateProcessW(%s) failed: %s", argv[0], ffDebugWin32Error(error));
         return "CreateProcessW() failed";
     }
 
@@ -134,7 +181,7 @@ const char* ffProcessSpawn(char* const argv[], bool useStdErr, FFProcessHandle* 
     outHandle->pipeRead = hChildPipeRead;
     hChildPipeRead = INVALID_HANDLE_VALUE; // ownership transferred, don't close it
 
-    return NULL;
+    return nullptr;
 }
 
 static void terminateChildProcess(HANDLE hProcess, HANDLE hChildPipeRead, HANDLE hReadEvent, IO_STATUS_BLOCK* piosb) {
@@ -154,11 +201,13 @@ const char* ffProcessReadOutput(FFProcessHandle* handle, FFstrbuf* buffer) {
     int32_t timeout = instance.config.general.processingTimeout;
     FF_AUTO_CLOSE_FD HANDLE hProcess = handle->pid;
     FF_AUTO_CLOSE_FD HANDLE hChildPipeRead = handle->pipeRead;
-    FF_AUTO_CLOSE_FD HANDLE hReadEvent = NULL;
+    FF_AUTO_CLOSE_FD HANDLE hReadEvent = nullptr;
     handle->pid = INVALID_HANDLE_VALUE;
     handle->pipeRead = INVALID_HANDLE_VALUE;
 
-    if (timeout >= 0 && !NT_SUCCESS(NtCreateEvent(&hReadEvent, EVENT_ALL_ACCESS, NULL, SynchronizationEvent, FALSE))) {
+    NTSTATUS createStatus = STATUS_SUCCESS;
+    if (timeout >= 0 && !NT_SUCCESS(createStatus = NtCreateEvent(&hReadEvent, EVENT_ALL_ACCESS, nullptr, SynchronizationEvent, FALSE))) {
+        FF_DEBUG("NtCreateEvent() failed: %s", ffDebugNtStatus(createStatus));
         return "NtCreateEvent() failed";
     }
 
@@ -169,15 +218,16 @@ const char* ffProcessReadOutput(FFProcessHandle* handle, FFstrbuf* buffer) {
         NTSTATUS status = NtReadFile(
             hChildPipeRead,
             hReadEvent,
-            NULL,
-            NULL,
+            nullptr,
+            nullptr,
             &iosb,
             str,
             (ULONG) sizeof(str),
-            NULL,
-            NULL);
+            nullptr,
+            nullptr);
         if (status == STATUS_PENDING) {
-            switch (NtWaitForSingleObject(hReadEvent, FALSE, &(LARGE_INTEGER) { .QuadPart = (int64_t) timeout * -10000 })) {
+            NTSTATUS waitStatus = NtWaitForSingleObject(hReadEvent, FALSE, &(LARGE_INTEGER) { .QuadPart = (int64_t) timeout * -10000 });
+            switch (waitStatus) {
                 case STATUS_WAIT_0:
                     status = iosb.Status;
                     break;
@@ -188,6 +238,7 @@ const char* ffProcessReadOutput(FFProcessHandle* handle, FFstrbuf* buffer) {
                 }
 
                 default:
+                    FF_DEBUG("NtWaitForSingleObject(hReadEvent) failed: %s", ffDebugNtStatus(waitStatus));
                     terminateChildProcess(hProcess, hChildPipeRead, hReadEvent, &iosb);
                     return "NtWaitForSingleObject(hReadEvent) failed";
             }
@@ -198,7 +249,8 @@ const char* ffProcessReadOutput(FFProcessHandle* handle, FFstrbuf* buffer) {
         }
 
         if (!NT_SUCCESS(status)) {
-            terminateChildProcess(hProcess, hChildPipeRead, NULL, &iosb);
+            FF_DEBUG("NtReadFile(hChildPipeRead) failed: %s", ffDebugNtStatus(status));
+            terminateChildProcess(hProcess, hChildPipeRead, nullptr, &iosb);
             return "NtReadFile(hChildPipeRead) failed";
         }
 
@@ -209,17 +261,26 @@ const char* ffProcessReadOutput(FFProcessHandle* handle, FFstrbuf* buffer) {
 exit: {
     PROCESS_BASIC_INFORMATION info = {};
     ULONG size;
-    if (NT_SUCCESS(NtQueryInformationProcess(hProcess, ProcessBasicInformation, &info, sizeof(info), &size))) {
+    NTSTATUS status = NtQueryInformationProcess(hProcess, ProcessBasicInformation, &info, sizeof(info), &size);
+    if (NT_SUCCESS(status)) {
         assert(size == sizeof(info));
         if (info.ExitStatus != STILL_ACTIVE && info.ExitStatus != 0) {
+            if (info.ExitStatus == 9009) {
+                // Note: CMD swallows 9009 errorlevel and returns 1 by default.
+                // One must use `& call exit %^ERRORLEVEL%` to propagate the correct error code.
+                FF_DEBUG("Child process exited with error code 9009 (command not found)");
+                return "command not found";
+            }
+            FF_DEBUG("Child process exited with an error: %x %s", (unsigned) info.ExitStatus, ffDebugNtStatus(info.ExitStatus));
             return "Child process exited with an error";
         }
     } else {
+        FF_DEBUG("NtQueryInformationProcess(ProcessBasicInformation) failed: %s", ffDebugNtStatus(status));
         return "NtQueryInformationProcess(ProcessBasicInformation) failed";
     }
 }
 
-    return NULL;
+    return nullptr;
 }
 
 bool ffProcessGetInfoWindows(uint32_t pid, uint32_t* ppid, FFstrbuf* pname, FFstrbuf* exe, const char** exeName, FFstrbuf* exePath, bool* gui) {

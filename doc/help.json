@@ -83,6 +83,16 @@
                 "type": "num",
                 "default": 0
             }
+        },
+        {
+            "long": "watch",
+            "short": "w",
+            "desc": "Alias of dynamic-interval, but the value is in seconds instead of milliseconds. If no value is provided, it defaults to 1 second",
+            "arg": {
+                "type": "num",
+                "optional": true,
+                "default": 1
+            }
         }
     ],
     "Config": [
@@ -97,26 +107,8 @@
         },
         {
             "long": "gen-config",
-            "desc": "Generate a minimal config file at the specified path",
-            "remark": "Defaults to \"~/.config/fastfetch/config.jsonc\". Prints the generated config if <path> is \"-\"",
-            "arg": {
-                "type": "path",
-                "optional": true
-            }
-        },
-        {
-            "long": "gen-config-full",
-            "desc": "Generate a full config file with all optional settings at the specified path",
-            "remark": "Defaults to \"~/.config/fastfetch/config.jsonc\". Prints the generated config if <path> is \"-\"",
-            "arg": {
-                "type": "path",
-                "optional": true
-            }
-        },
-        {
-            "long": "gen-config-force",
-            "desc": "Generate a config file at the specified path, overwriting any existing file",
-            "remark": "Defaults to \"~/.config/fastfetch/config.jsonc\"",
+            "desc": "Interactively generate a config file at the specified path",
+            "remark": "Opens an interactive configuration UI when run in a terminal. Falls back to non-interactive generation when env-var `$NO_COLOR` is set or stdin/stdout is not a TTY. Defaults to \"~/.config/fastfetch/config.jsonc\". Prints the generated config if <path> is \"-\"",
             "arg": {
                 "type": "path",
                 "optional": true
@@ -203,6 +195,7 @@
                     "file-raw": "Text file, printed as is",
                     "data": "Text data, printed with color code replacement",
                     "data-raw": "Text data, printed as is",
+                    "command-raw": "Command to run, whose output is printed as is",
                     "sixel": "Image file, rendered as sixel",
                     "kitty": "Image file, rendered using the Kitty graphics protocol",
                     "kitty-direct": "Image file, tells the terminal emulator to read image data from the specified file",
@@ -278,6 +271,14 @@
             }
         },
         {
+            "long": "logo-padding-bottom",
+            "desc": "Set the padding at the bottom of the logo",
+            "remark": "Only used with \"--logo-position top\"",
+            "arg": {
+                "type": "num"
+            }
+        },
+        {
             "long": "logo-print-remaining",
             "desc": "Specify whether to print remaining logo lines when the logo is taller than the module list",
             "arg": {
@@ -292,6 +293,7 @@
             "arg": {
                 "type": "enum",
                 "enum": {
+                    "auto": "Automatically choose left or top based on terminal width",
                     "left": "Left",
                     "top": "Top",
                     "right": "Right"
@@ -299,12 +301,33 @@
             }
         },
         {
-            "long": "logo-recache",
-            "desc": "If true, regenerate the image logo cache",
+            "long": "logo-cache",
+            "desc": "Specify how the image logo cache is used",
+            "remark": "See \"--help logo-animation-frame\" for the one case where a cached rendering can outlive the image type that produced it",
             "arg": {
-                "type": "bool",
+                "type": "enum",
                 "optional": true,
-                "default": false
+                "default": "true",
+                "enum": {
+                    "true": "Reuse a cached rendering when it is valid, and write it back on a cache miss",
+                    "false": "Ignore the image logo cache completely: neither read nor write it",
+                    "regen": "Ignore any existing cached rendering and regenerate it"
+                }
+            }
+        },
+        {
+            "long": "logo-animation-frame",
+            "desc": "Select which frame of an animated image logo to render",
+            "remark": [
+                "Animated kitty graphics only, and only if the image source is animated; 1 or higher renders that frame as a still image, 0 plays the animation",
+                "A selected frame is cached exactly like the first frame is, sharing its entries; the frame number is recorded next to them, so changing this option re-renders",
+                "That record is per cache directory, not per image type: switching --logo-type between two types that both have a cached rendering here, and asking for a different frame, can pair one type's rendering with the other's frame number",
+                "Run \"--logo-cache regen\" after such a switch"
+            ],
+            "arg": {
+                "type": "num",
+                "optional": true,
+                "default": 1
             }
         },
         {
@@ -591,6 +614,39 @@
                     "both-4": "Show both icon and string with 4 spaces between them"
                 },
                 "default": "string"
+            }
+        },
+        {
+            "long": "key-language",
+            "desc": "Specify the language used for module keys",
+            "remark": "Leave empty for auto-detection based on the system locale. Unsupported locales fall back to English",
+            "arg": {
+                "type": "enum",
+                "default": "en",
+                "optional": true,
+                "enum": {
+                    "en": "English",
+                    "ar": "Arabic",
+                    "cs": "Czech",
+                    "de": "German",
+                    "es": "Spanish",
+                    "fi": "Finnish",
+                    "fr": "French",
+                    "gl": "Galician",
+                    "he": "Hebrew",
+                    "id": "Indonesian",
+                    "it": "Italian",
+                    "ja": "Japanese",
+                    "ko": "Korean",
+                    "pl": "Polish",
+                    "pt": "Portuguese",
+                    "ru": "Russian",
+                    "tr": "Turkish",
+                    "uk": "Ukrainian",
+                    "vi": "Vietnamese",
+                    "zh_CN": "Simplified Chinese",
+                    "zh_TW": "Traditional Chinese"
+                }
             }
         },
         {

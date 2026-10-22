@@ -10,7 +10,7 @@ bool ffPrintMonitor(FFMonitorOptions* options) {
     const FFDisplayServerResult* result = ffConnectDisplayServer();
 
     if (!result->displays.length) {
-        ffPrintError(FF_MONITOR_MODULE_NAME, 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "No display detected");
+        ffPrintError(FF_MODULE_GET_DISPLAY_NAME(Monitor), 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "No display detected");
         return false;
     }
 
@@ -23,7 +23,7 @@ bool ffPrintMonitor(FFMonitorOptions* options) {
 
         ffStrbufClear(&key);
         if (options->moduleArgs.key.length == 0) {
-            ffStrbufAppendS(&key, FF_MONITOR_MODULE_NAME);
+            ffStrbufAppendS(&key, FF_MODULE_GET_DISPLAY_NAME(Monitor));
             if (display->name.length > 0) {
                 ffStrbufAppendF(&key, " (%s)", display->name.chars);
             }
@@ -33,6 +33,7 @@ bool ffPrintMonitor(FFMonitorOptions* options) {
                                                                                FF_ARG(moduleIndex, "index"),
                                                                                FF_ARG(display->name, "name"),
                                                                                FF_ARG(options->moduleArgs.keyIcon, "icon"),
+                                                                               FF_ARG(FF_MODULE_GET_DISPLAY_NAME(Monitor), "module-name"),
                                                                            }));
         }
 
@@ -51,14 +52,6 @@ bool ffPrintMonitor(FFMonitorOptions* options) {
             }
             putchar('\n');
         } else {
-            char buf[32];
-            if (display->serial) {
-                const uint8_t* nums = (uint8_t*) &display->serial;
-                snprintf(buf, sizeof(buf), "%2X-%2X-%2X-%2X", nums[0], nums[1], nums[2], nums[3]);
-            } else {
-                buf[0] = '\0';
-            }
-
             FF_PRINT_FORMAT_CHECKED(key.chars, 0, &options->moduleArgs, FF_PRINT_TYPE_NO_CUSTOM_KEY, ((FFformatarg[]) {
                                                                                                          FF_ARG(display->name, "name"),
                                                                                                          FF_ARG(display->width, "width"),
@@ -69,13 +62,13 @@ bool ffPrintMonitor(FFMonitorOptions* options) {
                                                                                                          FF_ARG(ppi, "ppi"),
                                                                                                          FF_ARG(display->manufactureYear, "manufacture-year"),
                                                                                                          FF_ARG(display->manufactureWeek, "manufacture-week"),
-                                                                                                         FF_ARG(buf, "serial"),
+                                                                                                         FF_ARG(display->serial, "serial"),
                                                                                                          FF_ARG(display->refreshRate, "refresh-rate"),
                                                                                                          FF_ARG(hdrCompatible, "hdr-compatible"),
                                                                                                      }));
         }
 
-        ffStrbufDestroy(&display->name);
+        // result is a singleton, so we don't destroy the members
         ++index;
     }
 
@@ -90,15 +83,16 @@ void ffParseMonitorJsonObject(FFMonitorOptions* options, yyjson_val* module) {
             continue;
         }
 
-        ffPrintError(FF_MONITOR_MODULE_NAME, 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "Unknown JSON key %s", unsafe_yyjson_get_str(key));
+        ffPrintError(FF_MODULE_GET_DISPLAY_NAME(Monitor), 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "Unknown JSON key %s", unsafe_yyjson_get_str(key));
     }
 }
 
+[[gnu::cold]]
 void ffGenerateMonitorJsonConfig(FFMonitorOptions* options, yyjson_mut_doc* doc, yyjson_mut_val* module) {
     ffJsonConfigGenerateModuleArgsConfig(doc, module, &options->moduleArgs);
 }
 
-bool ffGenerateMonitorJsonResult(FF_A_UNUSED FFMonitorOptions* options, yyjson_mut_doc* doc, yyjson_mut_val* module) {
+bool ffGenerateMonitorJsonResult([[maybe_unused]] FFMonitorOptions* options, yyjson_mut_doc* doc, yyjson_mut_val* module) {
     yyjson_mut_obj_add_str(doc, module, "error", "Monitor module is an alias of Display module");
     return false;
 }
@@ -112,8 +106,31 @@ void ffDestroyMonitorOptions(FFMonitorOptions* options) {
 }
 
 FFModuleBaseInfo ffMonitorModuleInfo = {
-    .name = FF_MONITOR_MODULE_NAME,
+    .name = "Monitor",
     .description = "Same as Display module, but with a different default output format",
+    .displayName = {
+        .en = "Monitor",
+        .ar = "الشاشة",
+        .cs = "Monitor",
+        .de = "Monitor",
+        .es = "Monitor",
+        .fi = "Monitori",
+        .fr = "Moniteur",
+        .gl = "Monitor",
+        .he = "צג",
+        .id = "Monitor",
+        .it = "Monitor",
+        .ja = "モニター",
+        .ko = "모니터",
+        .pl = "Monitor",
+        .pt = "Monitor",
+        .ru = "Монитор",
+        .tr = "Monitör",
+        .uk = "Монітор",
+        .vi = "Màn hình",
+        .zh_CN = "监视器",
+        .zh_TW = "監視器",
+    },
     .initOptions = (void*) ffInitMonitorOptions,
     .destroyOptions = (void*) ffDestroyMonitorOptions,
     .parseJsonObject = (void*) ffParseMonitorJsonObject,
@@ -121,7 +138,7 @@ FFModuleBaseInfo ffMonitorModuleInfo = {
     .generateJsonResult = (void*) ffGenerateMonitorJsonResult,
     .generateJsonConfig = (void*) ffGenerateMonitorJsonConfig,
     .formatArgs = FF_FORMAT_ARG_LIST(((FFModuleFormatArg[]) {
-        { "Display name", "name" },
+        { "Display name *", "name" },
         { "Native resolution width in pixels", "width" },
         { "Native resolution height in pixels", "height" },
         { "Physical width in millimeters", "physical-width" },
@@ -133,5 +150,6 @@ FFModuleBaseInfo ffMonitorModuleInfo = {
         { "Serial number", "serial" },
         { "Maximum refresh rate in Hz", "refresh-rate" },
         { "True if the display is HDR compatible", "hdr-compatible" },
-    }))
+    })),
+    .defaultOrder = 19,
 };

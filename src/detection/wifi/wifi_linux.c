@@ -1,6 +1,8 @@
 #include "wifi.h"
+#include "common/endian.h"
 #include "common/io.h"
 #include "common/debug.h"
+#include "common/percent.h"
 #include "common/strutil.h"
 
 #include <sys/time.h>
@@ -11,12 +13,11 @@
 #include <linux/wireless.h>
 #include <unistd.h>
 
-#if !__BIG_ENDIAN__
-    #include <linux/genetlink.h>
-    #include <linux/nl80211.h>
+#include <linux/genetlink.h>
+#include <linux/nl80211.h>
 
-    // Silence warning of `NLA_HDRLEN` and `NLA_ALIGN`
-    #pragma GCC diagnostic ignored "-Wsign-conversion"
+// Silence warning of `NLA_HDRLEN` and `NLA_ALIGN`
+#pragma GCC diagnostic ignored "-Wsign-conversion"
 
 typedef struct FFWifiNlContext {
     int sockFd;
@@ -34,11 +35,6 @@ typedef struct FFWifiSecurityFlags {
     bool owe : 1;
     bool eap : 1;
 } FFWifiSecurityFlags;
-
-static inline double rssiToSignalQuality(int rssi) {
-    return (double) (rssi >= -50 ? 100 : rssi <= -100 ? 0
-                                                      : (rssi + 100) * 2);
-}
 
 static inline uint32_t ffWifiGetNetlinkPortId(int sockFd) {
     struct sockaddr_nl addr = {};
@@ -61,7 +57,7 @@ static const struct nlattr* ffWifiNlAttrNext(const struct nlattr* attr, size_t* 
     size_t alignedLen = NLA_ALIGN(attr->nla_len);
     if (alignedLen > *remaining) {
         *remaining = 0;
-        return NULL;
+        return nullptr;
     }
 
     *remaining -= alignedLen;
@@ -131,7 +127,7 @@ static bool ffWifiNlGetFamilyId(FFWifiNlContext* ctx) {
 
     uint8_t buffer[8192];
     while (true) {
-        ssize_t received = recvfrom(ctx->sockFd, buffer, sizeof(buffer), 0, NULL, NULL);
+        ssize_t received = recvfrom(ctx->sockFd, buffer, sizeof(buffer), 0, nullptr, nullptr);
         if (received < 0) {
             FF_DEBUG("Failed to receive nl80211 family reply: %s", strerror(errno));
             return false;
@@ -212,8 +208,9 @@ static bool ffWifiNlInit(FFWifiNlContext* ctx) {
     return true;
 }
 
-static double ffWifiParseBitrateFromRateInfo(const struct nlattr* rateAttr, FFstrbuf* protocol) {
+static double ffWifiParseBitrateFromRateInfo(const struct nlattr* rateAttr, FFstrbuf* protocol, uint16_t* channelWidth) {
     double rate = -DBL_MAX;
+    uint16_t width = 0;
     size_t remaining = ffWifiNlAttrPayload(rateAttr);
 
     for (const struct nlattr* info = (const struct nlattr*) ffWifiNlAttrData(rateAttr);
@@ -223,6 +220,40 @@ static double ffWifiParseBitrateFromRateInfo(const struct nlattr* rateAttr, FFst
         size_t payload = ffWifiNlAttrPayload(info);
 
         switch (type) {
+            case NL80211_RATE_INFO_40_MHZ_WIDTH:
+                width = 40;
+                break;
+            case NL80211_RATE_INFO_80_MHZ_WIDTH:
+            case NL80211_RATE_INFO_80P80_MHZ_WIDTH:
+                width = 80;
+                break;
+            case NL80211_RATE_INFO_160_MHZ_WIDTH:
+                width = 160;
+                break;
+            case 18 /* NL80211_RATE_INFO_320_MHZ_WIDTH */:
+                width = 320;
+                break;
+            case NL80211_RATE_INFO_10_MHZ_WIDTH:
+                width = 10;
+                break;
+            case NL80211_RATE_INFO_5_MHZ_WIDTH:
+                width = 5;
+                break;
+            case 25 /* NL80211_RATE_INFO_1_MHZ_WIDTH */:
+                width = 1;
+                break;
+            case 26 /* NL80211_RATE_INFO_2_MHZ_WIDTH */:
+                width = 2;
+                break;
+            case 27 /* NL80211_RATE_INFO_4_MHZ_WIDTH */:
+                width = 4;
+                break;
+            case 28 /* NL80211_RATE_INFO_8_MHZ_WIDTH */:
+                width = 8;
+                break;
+            case 29 /* NL80211_RATE_INFO_16_MHZ_WIDTH */:
+                width = 16;
+                break;
             case 30 /* NL80211_RATE_INFO_UHR_MCS */:
                 ffStrbufSetStatic(protocol, "802.11bn (Wi-Fi 8)");
                 break;
@@ -254,7 +285,124 @@ static double ffWifiParseBitrateFromRateInfo(const struct nlattr* rateAttr, FFst
         }
     }
 
+    if (rate != -DBL_MAX && *channelWidth == 0) {
+        *channelWidth = width;
+    }
+
     return rate;
+}
+
+static uint16_t ffWifiChannelWidthToMhz(uint32_t width) {
+    switch (width) {
+        case NL80211_CHAN_WIDTH_20_NOHT:
+        case NL80211_CHAN_WIDTH_20:
+            return 20;
+        case NL80211_CHAN_WIDTH_40:
+            return 40;
+        case NL80211_CHAN_WIDTH_80:
+        case NL80211_CHAN_WIDTH_80P80:
+            return 80;
+        case NL80211_CHAN_WIDTH_160:
+            return 160;
+        case 6 /* NL80211_CHAN_WIDTH_5 */:
+            return 5;
+        case 7 /* NL80211_CHAN_WIDTH_10 */:
+            return 10;
+        case 8 /* NL80211_CHAN_WIDTH_1 */:
+            return 1;
+        case 9 /* NL80211_CHAN_WIDTH_2 */:
+            return 2;
+        case 10 /* NL80211_CHAN_WIDTH_4 */:
+            return 4;
+        case 11 /* NL80211_CHAN_WIDTH_8 */:
+            return 8;
+        case 12 /* NL80211_CHAN_WIDTH_16 */:
+            return 16;
+        case 13 /* NL80211_CHAN_WIDTH_320 */:
+            return 320;
+        default:
+            return 0;
+    }
+}
+
+static bool ffWifiFetchInterfaceInfo(FFWifiNlContext* ctx, FFWifiResult* item, uint32_t ifIndex) {
+    struct {
+        struct nlmsghdr nlh;
+        struct genlmsghdr genl;
+        char attrs[32];
+    } req = {
+        .nlh = {
+            .nlmsg_len = NLMSG_LENGTH(sizeof(struct genlmsghdr)),
+            .nlmsg_type = ctx->nl80211FamilyId,
+            .nlmsg_flags = NLM_F_REQUEST | NLM_F_ACK,
+            .nlmsg_seq = ++ctx->seq,
+            .nlmsg_pid = ctx->portId,
+        },
+        .genl = {
+            .cmd = NL80211_CMD_GET_INTERFACE,
+            .version = 0,
+        },
+    };
+
+    if (!ffWifiNlAppendAttr(&req.nlh, sizeof(req), NL80211_ATTR_IFINDEX, &ifIndex, sizeof(ifIndex))) {
+        FF_DEBUG("Failed to build nl80211 interface request");
+        return false;
+    }
+
+    struct sockaddr_nl addr = {
+        .nl_family = AF_NETLINK,
+    };
+
+    ssize_t sent = sendto(ctx->sockFd, &req, req.nlh.nlmsg_len, 0, (struct sockaddr*) &addr, sizeof(addr));
+    if (sent != (ssize_t) req.nlh.nlmsg_len) {
+        FF_DEBUG("Failed to send nl80211 interface request");
+        return false;
+    }
+
+    uint8_t buffer[8192];
+    while (true) {
+        ssize_t received = recvfrom(ctx->sockFd, buffer, sizeof(buffer), 0, nullptr, nullptr);
+        if (received < 0) {
+            FF_DEBUG("Failed to receive nl80211 interface reply: %s", strerror(errno));
+            return false;
+        }
+
+        for (const struct nlmsghdr* nlh = (const struct nlmsghdr*) buffer;
+            NLMSG_OK(nlh, received);
+            nlh = NLMSG_NEXT(nlh, received)) {
+            if (nlh->nlmsg_seq != req.nlh.nlmsg_seq) {
+                continue;
+            }
+
+            if (nlh->nlmsg_type == NLMSG_ERROR) {
+                const struct nlmsgerr* err = (const struct nlmsgerr*) NLMSG_DATA(nlh);
+                if (err->error != 0) {
+                    FF_DEBUG("nl80211 interface request failed: %s", strerror(-err->error));
+                }
+                return false;
+            }
+
+            if (nlh->nlmsg_type != ctx->nl80211FamilyId) {
+                continue;
+            }
+
+            const struct genlmsghdr* genl = (const struct genlmsghdr*) NLMSG_DATA(nlh);
+            size_t attrRemaining = nlh->nlmsg_len - NLMSG_HDRLEN - GENL_HDRLEN;
+            for (const struct nlattr* attr = (const struct nlattr*) ((const char*) genl + GENL_HDRLEN);
+                ffWifiNlAttrOk(attr, attrRemaining);
+                attr = ffWifiNlAttrNext(attr, &attrRemaining)) {
+                if ((attr->nla_type & NLA_TYPE_MASK) != NL80211_ATTR_CHANNEL_WIDTH ||
+                    ffWifiNlAttrPayload(attr) < sizeof(uint32_t)) {
+                    continue;
+                }
+
+                item->conn.channelWidth = ffWifiChannelWidthToMhz(*(const uint32_t*) ffWifiNlAttrData(attr));
+                return item->conn.channelWidth != 0;
+            }
+
+            return false;
+        }
+    }
 }
 
 static void ffWifiApplySecurityFlags(FFWifiResult* item, const FFWifiSecurityFlags* sec) {
@@ -307,7 +455,7 @@ static void ffWifiParseRsnIe(const uint8_t* ie, size_t len, FFWifiSecurityFlags*
     if (pos + 2 > len) { // pairwise cipher suite count field length
         return;
     }
-    uint16_t pairwiseCount = *(uint16_t*) (ie + pos);
+    uint16_t pairwiseCount = FF_READ_LE(*(const uint16_t*) (ie + pos));
     pos += 2; // skip pairwise cipher suite count field
 
     size_t pairwiseLen = (size_t) pairwiseCount * 4; // each suite selector is 4 bytes
@@ -319,7 +467,7 @@ static void ffWifiParseRsnIe(const uint8_t* ie, size_t len, FFWifiSecurityFlags*
     if (pos + 2 > len) { // AKM suite count field length
         return;
     }
-    uint16_t akmCount = *(uint16_t*) (ie + pos);
+    uint16_t akmCount = FF_READ_LE(*(const uint16_t*) (ie + pos));
     pos += 2; // skip AKM suite count field
 
     for (uint16_t i = 0; i < akmCount && pos + 4 <= len; ++i, pos += 4) { // each AKM suite selector is 4 bytes
@@ -376,13 +524,13 @@ static void ffWifiParseWpaVendorIe(const uint8_t* ie, size_t len, FFWifiSecurity
     if (pos + 2 > len) { // unicast cipher suite count field length
         return;
     }
-    uint16_t pairwiseCount = *(uint16_t*) (ie + pos);
+    uint16_t pairwiseCount = FF_READ_LE(*(const uint16_t*) (ie + pos));
     pos += 2 + (size_t) pairwiseCount * 4; // count field(2) + N unicast suite selectors(4 each)
 
     if (pos + 2 > len) { // AKM suite count field length
         return;
     }
-    uint16_t akmCount = *(uint16_t*) (ie + pos);
+    uint16_t akmCount = FF_READ_LE(*(const uint16_t*) (ie + pos));
     pos += 2; // skip AKM suite count field
 
     for (uint16_t i = 0; i < akmCount && pos + 4 <= len; ++i, pos += 4) { // each AKM suite selector is 4 bytes
@@ -453,7 +601,7 @@ static void ffWifiParseBssAttr(const struct nlattr* bssAttr, FFWifiResult* item)
             item->conn.channel = ffWifiFreqToChannel(item->conn.frequency);
         } else if (type == NL80211_BSS_SIGNAL_MBM && payload >= sizeof(int32_t)) {
             int rssi = *(int32_t*) ffWifiNlAttrData(attr) / 100; // mBm (100 * dBm) => dBm
-            item->conn.signalQuality = rssiToSignalQuality(rssi);
+            item->conn.signalQuality = ffRssiToSignalQuality(rssi);
         } else if (type == NL80211_BSS_CAPABILITY && payload >= sizeof(uint16_t)) {
             uint16_t capability = *(uint16_t*) ffWifiNlAttrData(attr);
             sec.privacy = (capability & (1u << 4u)) != 0; // IEEE 802.11 capability bit 4: privacy
@@ -502,7 +650,7 @@ static bool ffWifiFetchScanInfo(FFWifiNlContext* ctx, FFWifiResult* item, uint32
 
     uint8_t buffer[1024 * 16];
     while (true) {
-        ssize_t received = recvfrom(ctx->sockFd, buffer, sizeof(buffer), 0, NULL, NULL);
+        ssize_t received = recvfrom(ctx->sockFd, buffer, sizeof(buffer), 0, nullptr, nullptr);
         if (received < 0) {
             FF_DEBUG("Failed to receive nl80211 scan reply: %s", strerror(errno));
             return false;
@@ -565,14 +713,14 @@ static void ffWifiParseStationInfo(const struct nlattr* staInfoAttr, FFWifiResul
 
         if (type == NL80211_STA_INFO_SIGNAL && payload >= sizeof(uint8_t) && item->conn.signalQuality == -DBL_MAX) {
             int rssi = (int8_t) *(const uint8_t*) ffWifiNlAttrData(attr);
-            item->conn.signalQuality = rssiToSignalQuality(rssi);
-        } else if (type == NL80211_STA_INFO_TX_BITRATE && item->conn.txRate == -DBL_MAX) {
-            double tx = ffWifiParseBitrateFromRateInfo(attr, &item->conn.protocol);
+            item->conn.signalQuality = ffRssiToSignalQuality(rssi);
+        } else if (type == NL80211_STA_INFO_TX_BITRATE && (item->conn.txRate == -DBL_MAX || item->conn.channelWidth == 0)) {
+            double tx = ffWifiParseBitrateFromRateInfo(attr, &item->conn.protocol, &item->conn.channelWidth);
             if (tx != -DBL_MAX) {
                 item->conn.txRate = tx;
             }
-        } else if (type == NL80211_STA_INFO_RX_BITRATE && item->conn.rxRate == -DBL_MAX) {
-            double rx = ffWifiParseBitrateFromRateInfo(attr, &item->conn.protocol);
+        } else if (type == NL80211_STA_INFO_RX_BITRATE && (item->conn.rxRate == -DBL_MAX || item->conn.channelWidth == 0)) {
+            double rx = ffWifiParseBitrateFromRateInfo(attr, &item->conn.protocol, &item->conn.channelWidth);
             if (rx != -DBL_MAX) {
                 item->conn.rxRate = rx;
             }
@@ -617,7 +765,7 @@ static bool ffWifiFetchStationInfo(FFWifiNlContext* ctx, FFWifiResult* item, uin
     uint8_t buffer[8192];
     bool gotStation = false;
     while (true) {
-        ssize_t received = recvfrom(ctx->sockFd, buffer, sizeof(buffer), 0, NULL, NULL);
+        ssize_t received = recvfrom(ctx->sockFd, buffer, sizeof(buffer), 0, nullptr, nullptr);
         if (received < 0) {
             FF_DEBUG("Failed to receive nl80211 station reply: %s", strerror(errno));
             return gotStation;
@@ -680,6 +828,7 @@ static const char* detectWithNetlink(FFWifiNlContext* ctx, FFWifiResult* item, u
     if (ffWifiFetchScanInfo(ctx, item, ifIndex)) {
         FF_DEBUG("found associated BSS: %s", item->conn.ssid.chars);
         ffStrbufSetStatic(&item->conn.status, "connected");
+        ffWifiFetchInterfaceInfo(ctx, item, ifIndex);
         ffWifiFetchStationInfo(ctx, item, ifIndex);
         if (!item->conn.protocol.length && item->conn.txRate != -DBL_MAX) {
             FF_DEBUG("nl80211 station info did not include MCS family fields");
@@ -690,10 +839,8 @@ static const char* detectWithNetlink(FFWifiNlContext* ctx, FFWifiResult* item, u
     }
 
     FF_DEBUG("Netlink wifi detection completed");
-    return NULL;
+    return nullptr;
 }
-#endif
-
 typedef struct FFWifiIcContext {
     int sockFd;
 } FFWifiIcContext;
@@ -884,7 +1031,7 @@ static const char* detectWithIoctl(FFWifiIcContext* ctx, FFWifiResult* item, cha
     }
 
     FF_DEBUG("Ioctl wifi detection completed");
-    return NULL;
+    return nullptr;
 }
 
 const char* ffDetectWifi(FFlist* result) {
@@ -896,14 +1043,12 @@ const char* ffDetectWifi(FFlist* result) {
         return "if_nameindex() failed";
     }
 
-#if !__BIG_ENDIAN__
     FFWifiNlContext nl = { .sockFd = -1 };
-#endif
     FFWifiIcContext ic = { .sockFd = -1 };
 
     FF_STRBUF_AUTO_DESTROY buffer = ffStrbufCreate();
 
-    for (struct if_nameindex* i = infs; !(i->if_index == 0 && i->if_name == NULL); ++i) {
+    for (struct if_nameindex* i = infs; !(i->if_index == 0 && i->if_name == nullptr); ++i) {
         FF_DEBUG("Checking interface: %s (index: %u)", i->if_name, i->if_index);
         ffStrbufSetF(&buffer, "/sys/class/net/%s/phy80211/", i->if_name);
         if (!ffPathExists(buffer.chars, FF_PATHTYPE_DIRECTORY)) {
@@ -923,6 +1068,7 @@ const char* ffDetectWifi(FFlist* result) {
         item->conn.rxRate = -DBL_MAX;
         item->conn.txRate = -DBL_MAX;
         item->conn.channel = 0;
+        item->conn.channelWidth = 0;
         item->conn.frequency = 0;
 
         char operstate;
@@ -936,9 +1082,7 @@ const char* ffDetectWifi(FFlist* result) {
         if (operstate == 'u') {
             ffStrbufSetStatic(&item->inf.status, "up");
 
-#if !__BIG_ENDIAN__
             detectWithNetlink(&nl, item, i->if_index);
-#endif
             detectWithIoctl(&ic, item, i->if_name);
         } else {
             ffStrbufSetStatic(&item->conn.status, "disconnected");
@@ -952,7 +1096,7 @@ const char* ffDetectWifi(FFlist* result) {
             }
             flags[len] = '\0';
 
-            unsigned flagsVal = (unsigned) strtoul(flags, NULL, 16); // parse /sys flags as hexadecimal
+            unsigned flagsVal = (unsigned) strtoul(flags, nullptr, 16); // parse /sys flags as hexadecimal
             if (flagsVal & IFF_UP) {
                 ffStrbufSetStatic(&item->inf.status, "up");
             } else {
@@ -962,15 +1106,13 @@ const char* ffDetectWifi(FFlist* result) {
     }
 
     if_freenameindex(infs);
-#if !__BIG_ENDIAN__
     if (nl.sockFd >= 0) {
         close(nl.sockFd);
     }
-#endif
     if (ic.sockFd >= 0) {
         close(ic.sockFd);
     }
 
     FF_DEBUG("Wifi detection completed, found %u wifi interfaces", result->length);
-    return NULL;
+    return nullptr;
 }

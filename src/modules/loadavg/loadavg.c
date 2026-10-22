@@ -11,13 +11,13 @@ bool ffPrintLoadavg(FFLoadavgOptions* options) {
 
     const char* error = ffDetectLoadavg(result);
     if (error) {
-        ffPrintError(FF_LOADAVG_MODULE_NAME, 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "%s", error);
+        ffPrintError(FF_MODULE_GET_DISPLAY_NAME(Loadavg), 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "%s", error);
         return false;
     }
 
     if (options->moduleArgs.outputFormat.length == 0) {
         if (options->compact) {
-            ffPrintLogoAndKey(FF_LOADAVG_MODULE_NAME, 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT);
+            ffPrintLogoAndKey(FF_MODULE_GET_DISPLAY_NAME(Loadavg), 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT);
             printf("%.*f, %.*f, %.*f\n", options->ndigits, result[0], options->ndigits, result[1], options->ndigits, result[2]);
         } else {
             FFCPUResult cpu = {
@@ -34,13 +34,14 @@ bool ffPrintLoadavg(FFLoadavgOptions* options) {
                 uint32_t duration = index == 0 ? 1 : index == 1 ? 5
                                                                 : 15;
                 if (options->moduleArgs.key.length == 0) {
-                    ffStrbufSetF(&buffer, "%s (%d min)", FF_LOADAVG_MODULE_NAME, duration);
+                    ffStrbufSetF(&buffer, "%s (%d min)", FF_MODULE_GET_DISPLAY_NAME(Loadavg), duration);
                 } else {
                     ffStrbufClear(&buffer);
                     FF_PARSE_FORMAT_STRING_CHECKED(&buffer, &options->moduleArgs.key, ((FFformatarg[]) {
                                                                                           FF_ARG(index, "index"),
                                                                                           FF_ARG(duration, "duration"),
                                                                                           FF_ARG(options->moduleArgs.keyIcon, "icon"),
+                                                                                          FF_ARG(FF_MODULE_GET_DISPLAY_NAME(Loadavg), "module-name"),
                                                                                       }));
                 }
 
@@ -72,7 +73,7 @@ bool ffPrintLoadavg(FFLoadavgOptions* options) {
             }
         }
     } else {
-        FF_PRINT_FORMAT_CHECKED(FF_LOADAVG_MODULE_NAME, 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, ((FFformatarg[]) {
+        FF_PRINT_FORMAT_CHECKED(FF_MODULE_GET_DISPLAY_NAME(Loadavg), 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, ((FFformatarg[]) {
                                                                                                             FF_ARG(result[0], "loadavg1"),
                                                                                                             FF_ARG(result[1], "loadavg2"),
                                                                                                             FF_ARG(result[2], "loadavg3"),
@@ -91,7 +92,14 @@ void ffParseLoadavgJsonObject(FFLoadavgOptions* options, yyjson_val* module) {
         }
 
         if (unsafe_yyjson_equals_str(key, "ndigits")) {
-            options->ndigits = (uint8_t) yyjson_get_uint(val);
+            // The schema documents 0..9 and the value ends up as the precision of `printf("%.*f")`,
+            // so a wider value is not truncated to fit `uint8_t` silently any more.
+            uint32_t ndigits = 0;
+            if (!ffJsonConfigParseUInt32(val, &ndigits, 9)) {
+                ffPrintError(FF_MODULE_GET_DISPLAY_NAME(Loadavg), 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "Property 'ndigits' must be an integer between 0 and 9");
+                continue;
+            }
+            options->ndigits = (uint8_t) ndigits;
             continue;
         }
 
@@ -104,10 +112,11 @@ void ffParseLoadavgJsonObject(FFLoadavgOptions* options, yyjson_val* module) {
             continue;
         }
 
-        ffPrintError(FF_LOADAVG_MODULE_NAME, 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "Unknown JSON key %s", unsafe_yyjson_get_str(key));
+        ffPrintError(FF_MODULE_GET_DISPLAY_NAME(Loadavg), 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "Unknown JSON key %s", unsafe_yyjson_get_str(key));
     }
 }
 
+[[gnu::cold]]
 void ffGenerateLoadavgJsonConfig(FFLoadavgOptions* options, yyjson_mut_doc* doc, yyjson_mut_val* module) {
     ffJsonConfigGenerateModuleArgsConfig(doc, module, &options->moduleArgs);
 
@@ -118,7 +127,7 @@ void ffGenerateLoadavgJsonConfig(FFLoadavgOptions* options, yyjson_mut_doc* doc,
     ffPercentGenerateJsonConfig(doc, module, options->percent);
 }
 
-bool ffGenerateLoadavgJsonResult(FF_A_UNUSED FFLoadavgOptions* options, yyjson_mut_doc* doc, yyjson_mut_val* module) {
+bool ffGenerateLoadavgJsonResult([[maybe_unused]] FFLoadavgOptions* options, yyjson_mut_doc* doc, yyjson_mut_val* module) {
     double result[3] = { 0.0 / 0.0, 0.0 / 0.0, 0.0 / 0.0 };
 
     const char* error = ffDetectLoadavg(result);
@@ -148,8 +157,31 @@ void ffDestroyLoadavgOptions(FFLoadavgOptions* options) {
 }
 
 FFModuleBaseInfo ffLoadavgModuleInfo = {
-    .name = FF_LOADAVG_MODULE_NAME,
+    .name = "Loadavg",
     .description = "Print system load averages",
+    .displayName = {
+        .en = "Load Average",
+        .ar = "متوسط الحمل",
+        .cs = "Průměrná zátěž",
+        .de = "Systemlast",
+        .es = "Promedio de carga",
+        .fi = "Kuormituksen Keskiarvo",
+        .fr = "Charge moyenne",
+        .gl = "Carga media",
+        .he = "עומס ממוצע",
+        .id = "Beban Rata-rata",
+        .it = "Carico medio",
+        .ja = "ロードアベレージ",
+        .ko = "시스템 부하 평균",
+        .pl = "Średnie obciążenie",
+        .pt = "Média de carga",
+        .ru = "Средняя нагрузка",
+        .tr = "Sistem Yükü",
+        .uk = "Середнє навантаження",
+        .vi = "Tải trung bình",
+        .zh_CN = "系统负载",
+        .zh_TW = "系統負載",
+    },
     .initOptions = (void*) ffInitLoadavgOptions,
     .destroyOptions = (void*) ffDestroyLoadavgOptions,
     .parseJsonObject = (void*) ffParseLoadavgJsonObject,
@@ -160,5 +192,6 @@ FFModuleBaseInfo ffLoadavgModuleInfo = {
         { "Load average over 1min", "loadavg1" },
         { "Load average over 5min", "loadavg2" },
         { "Load average over 15min", "loadavg3" },
-    }))
+    })),
+    .defaultOrder = 12,
 };

@@ -1,16 +1,112 @@
 #include "fastfetch.h"
 #include "common/color.h"
+#include "common/io.h"
 #include "common/jsonconfig.h"
 #include "common/percent.h"
 #include "common/strutil.h"
 #include "options/display.h"
 
+#if !FF_MODULE_DISABLE_TERMINALTHEME
+    #include "detection/terminaltheme/terminaltheme.h"
+#endif
+#if !FF_MODULE_DISABLE_LOCALE
+    #include "detection/locale/locale.h"
+#endif
+
 #include <unistd.h>
 
-const char* ffOptionsParseDisplayJsonConfig(FFOptionsDisplay* options, yyjson_val* root) {
+// @returns offsetof(FFModuleDisplayName, <language>)
+// @see src/common/option.h
+static uint32_t optionParseLanguageString(FFstrbuf* language) {
+    const bool detected = language->length == 0;
+
+    if (detected) {
+#if !FF_MODULE_DISABLE_LOCALE
+        const char* error = ffDetectLocale(language);
+        if (__builtin_expect(error != nullptr, false)) {
+            fprintf(stderr, "ffDetectLocale: %s\n", error);
+            exit(477);
+        }
+#else
+        fputs("Error: --key-language requires a value\n", stderr);
+        exit(477);
+#endif
+    }
+
+    ffStrbufSubstrBeforeFirstC(language, '.'); // Remove the encoding part of the locale
+    #if __linux__
+        ffStrbufSubstrBeforeFirstC(language, '@'); // Remove the modifier part of the locale (Linux only)
+    #endif
+    ffStrbufLowerCase(language);
+
+    if (language->length <= 1) {
+        if (language->chars[0] == 'c') {
+            return offsetof(FFModuleDisplayName, en);
+        } else {
+            goto error;
+        }
+    } else if (language->length > 2) {
+        if (language->chars[2] == '-') {
+            language->chars[2] = '_';
+        } else if (__builtin_expect(language->chars[2] != '_', false)) {
+            goto error;
+        }
+    }
+
+    // The language code is expected to be in the format of "en", "en_US", "de", "de_DE", etc.
+    // First try to match the full language code, then try to match just the first two characters (the language part).
+    // If no match is found, report a language not supported error, unless the language was auto-detected.
+    // en_US -> offsetof(FFModuleDisplayName, en)
+    // en -> offsetof(FFModuleDisplayName, en)
+    // zh_CN -> offsetof(FFModuleDisplayName, zh_CN)
+    // zh -> Error: Language 'zh' is not supported. This is an intentional design decision, as the language code 'zh' could refer to either Simplified or Traditional Chinese.
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmultichar"
+    switch (language->chars[0] << 8 | language->chars[1]) {
+        case 'en': return offsetof(FFModuleDisplayName, en);
+        case 'ar': return offsetof(FFModuleDisplayName, ar);
+        case 'cs': return offsetof(FFModuleDisplayName, cs);
+        case 'de': return offsetof(FFModuleDisplayName, de);
+        case 'es': return offsetof(FFModuleDisplayName, es);
+        case 'fi': return offsetof(FFModuleDisplayName, fi);
+        case 'fr': return offsetof(FFModuleDisplayName, fr);
+        case 'gl': return offsetof(FFModuleDisplayName, gl);
+        case 'he': return offsetof(FFModuleDisplayName, he);
+        case 'id': return offsetof(FFModuleDisplayName, id);
+        case 'it': return offsetof(FFModuleDisplayName, it);
+        case 'ja': return offsetof(FFModuleDisplayName, ja);
+        case 'ko': return offsetof(FFModuleDisplayName, ko);
+        case 'pl': return offsetof(FFModuleDisplayName, pl);
+        case 'pt': return offsetof(FFModuleDisplayName, pt);
+        case 'ru': return offsetof(FFModuleDisplayName, ru);
+        case 'tr': return offsetof(FFModuleDisplayName, tr);
+        case 'uk': return offsetof(FFModuleDisplayName, uk);
+        case 'vi': return offsetof(FFModuleDisplayName, vi);
+        case 'zh': {
+            if (ffStrbufEqualS(language, "zh_cn")) {
+                return offsetof(FFModuleDisplayName, zh_CN);
+            } else if (ffStrbufEqualS(language, "zh_tw")) {
+                return offsetof(FFModuleDisplayName, zh_TW);
+            }
+            goto error;
+        }
+    }
+#pragma GCC diagnostic pop
+
+error:
+    // The user asked for the system locale, not for this specific language. Most locales have no
+    // translation, so falling back to English is friendlier than aborting fastfetch entirely.
+    if (detected) return offsetof(FFModuleDisplayName, en);
+
+    fprintf(stderr, "Error: Language '%s' is not supported\n", language->chars);
+    exit(477);
+}
+
+const char* ffOptionsParseDisplayJsonConfig(FFOptionsDisplay* options, yyjson_val* root, yyjson_val** pkey) {
     yyjson_val* object = yyjson_obj_get(root, "display");
     if (!object) {
-        return NULL;
+        return nullptr;
     }
     if (!yyjson_is_obj(object)) {
         return "Property 'display' must be an object";
@@ -19,6 +115,7 @@ const char* ffOptionsParseDisplayJsonConfig(FFOptionsDisplay* options, yyjson_va
     yyjson_val *key, *val;
     size_t idx, max;
     yyjson_obj_foreach (object, idx, max, key, val) {
+        *pkey = key;
         if (unsafe_yyjson_equals_str(key, "stat")) {
             if (yyjson_is_bool(val)) {
                 if (yyjson_get_bool(val)) {
@@ -191,11 +288,11 @@ const char* ffOptionsParseDisplayJsonConfig(FFOptionsDisplay* options, yyjson_va
             yyjson_val* ndigits = yyjson_obj_get(val, "ndigits");
             if (ndigits) {
                 if (!yyjson_is_uint(ndigits)) {
-                    return "display.temperature.ndigits must be an unsigned integer";
+                    return "display.temp.ndigits must be an unsigned integer";
                 }
                 uint64_t val = yyjson_get_uint(ndigits);
                 if (val > 9) {
-                    return "display.temperature.ndigits must be between 0 and 9";
+                    return "display.temp.ndigits must be between 0 and 9";
                 }
                 options->tempNdigits = (uint8_t) val;
             }
@@ -203,7 +300,7 @@ const char* ffOptionsParseDisplayJsonConfig(FFOptionsDisplay* options, yyjson_va
             yyjson_val* color = yyjson_obj_get(val, "color");
             if (color) {
                 if (!yyjson_is_obj(color)) {
-                    return "display.temperature.color must be an object";
+                    return "display.temp.color must be an object";
                 }
 
                 yyjson_val* green = yyjson_obj_get(color, "green");
@@ -478,6 +575,17 @@ const char* ffOptionsParseDisplayJsonConfig(FFOptionsDisplay* options, yyjson_va
                 if (paddingLeft) {
                     options->keyPaddingLeft = (uint16_t) yyjson_get_uint(paddingLeft);
                 }
+
+                yyjson_val* language = yyjson_obj_get(val, "language");
+                if (language) {
+                    FF_STRBUF_AUTO_DESTROY languageBuffer = ffStrbufCreate();
+                    if (yyjson_is_str(language)) {
+                        ffStrbufSetJsonVal(&languageBuffer, language);
+                    } else if (!yyjson_is_null(language)) {
+                        return "display.key.language must be a string or null";
+                    }
+                    options->keyLanguage = optionParseLanguageString(&languageBuffer);
+                }
             } else {
                 return "display.key must be an object";
             }
@@ -570,11 +678,11 @@ const char* ffOptionsParseDisplayJsonConfig(FFOptionsDisplay* options, yyjson_va
         }
     }
 
-    return NULL;
+    return nullptr;
 }
 
 static inline void optionCheckString(const char* key, const char* value, FFstrbuf* buffer) {
-    if (value == NULL) {
+    if (value == nullptr) {
         fprintf(stderr, "Error: usage: %s <str>\n", key);
         exit(477);
     }
@@ -646,6 +754,9 @@ bool ffOptionsParseDisplayCommandLine(FFOptionsDisplay* options, const char* key
             options->keyType = (FFModuleKeyType) ffOptionParseEnum(key, value, (FFKeyValuePair[]) { { "none", FF_MODULE_KEY_TYPE_NONE }, { "string", FF_MODULE_KEY_TYPE_STRING }, { "icon", FF_MODULE_KEY_TYPE_ICON }, { "both", FF_MODULE_KEY_TYPE_BOTH }, { "both-0", FF_MODULE_KEY_TYPE_BOTH_0 }, { "both-1", FF_MODULE_KEY_TYPE_BOTH_1 }, { "both-2", FF_MODULE_KEY_TYPE_BOTH_2 }, { "both-3", FF_MODULE_KEY_TYPE_BOTH_3 }, { "both-4", FF_MODULE_KEY_TYPE_BOTH_4 }, {} });
         } else if (ffStrEqualsIgnCase(subkey, "padding-left")) {
             options->keyPaddingLeft = (uint16_t) ffOptionParseUInt32(key, value);
+        } else if (ffStrEqualsIgnCase(subkey, "language")) {
+            FF_STRBUF_AUTO_DESTROY language = ffStrbufCreateS(value);
+            options->keyLanguage = optionParseLanguageString(&language);
         } else {
             return false;
         }
@@ -824,20 +935,29 @@ bool ffOptionsParseDisplayCommandLine(FFOptionsDisplay* options, const char* key
 }
 
 void ffOptionsInitDisplay(FFOptionsDisplay* options) {
+    bool terminalLightTheme = false;
+    #if !FF_MODULE_DISABLE_TERMINALTHEME
+    {
+        // don't enable bright color if the terminal is in light mode
+        FFTerminalThemeResult result;
+        if (ffDetectTerminalTheme(&result, true /* forceEnv for performance */) && !result.bg.dark) {
+            terminalLightTheme = true;
+        }
+    }
+    #endif
+
     ffStrbufInit(&options->colorKeys);
     ffStrbufInit(&options->colorTitle);
     ffStrbufInit(&options->colorOutput);
     ffStrbufInit(&options->colorSeparator);
-    options->brightColor = !instance.state.terminalLightTheme;
+    options->brightColor = !terminalLightTheme;
     ffStrbufInitStatic(&options->keyValueSeparator, ": ");
 
     options->showErrors = false;
-    options->pipe = !isatty(STDOUT_FILENO) || !!getenv("NO_COLOR");
-
-#ifdef NDEBUG
-    options->disableLinewrap = !options->pipe;
-#else
+    options->pipe = !ffIsTerminal(STDOUT_FILENO) || !!getenv("NO_COLOR");
     options->disableLinewrap = false;
+
+#ifndef NDEBUG
     options->debugMode = !!getenv("FF_DEBUG");
 #endif
 
@@ -853,12 +973,13 @@ void ffOptionsInitDisplay(FFOptionsDisplay* options) {
     options->keyWidth = 0;
     options->keyPaddingLeft = 0;
     options->keyType = FF_MODULE_KEY_TYPE_STRING;
+    options->keyLanguage = offsetof(FFModuleDisplayName, en);
 
     options->tempUnit = FF_TEMPERATURE_UNIT_DEFAULT;
     options->tempNdigits = 1;
     ffStrbufInitStatic(&options->tempColorGreen, FF_COLOR_FG_GREEN);
-    ffStrbufInitStatic(&options->tempColorYellow, instance.state.terminalLightTheme ? FF_COLOR_FG_YELLOW : FF_COLOR_FG_LIGHT_YELLOW);
-    ffStrbufInitStatic(&options->tempColorRed, instance.state.terminalLightTheme ? FF_COLOR_FG_RED : FF_COLOR_FG_LIGHT_RED);
+    ffStrbufInitStatic(&options->tempColorYellow, terminalLightTheme ? FF_COLOR_FG_YELLOW : FF_COLOR_FG_LIGHT_YELLOW);
+    ffStrbufInitStatic(&options->tempColorRed, terminalLightTheme ? FF_COLOR_FG_RED : FF_COLOR_FG_LIGHT_RED);
     options->tempSpaceBeforeUnit = FF_SPACE_BEFORE_UNIT_DEFAULT;
 
     ffStrbufInitStatic(&options->barCharElapsed, "■");
@@ -868,8 +989,8 @@ void ffOptionsInitDisplay(FFOptionsDisplay* options) {
     ffStrbufInit(&options->barBorderLeftElapsed);
     ffStrbufInit(&options->barBorderRightElapsed);
     ffStrbufInitStatic(&options->barColorElapsed, "auto");
-    ffStrbufInitStatic(&options->barColorTotal, instance.state.terminalLightTheme ? FF_COLOR_FG_WHITE : FF_COLOR_FG_LIGHT_WHITE);
-    ffStrbufInitStatic(&options->barColorBorder, instance.state.terminalLightTheme ? FF_COLOR_FG_WHITE : FF_COLOR_FG_LIGHT_WHITE);
+    ffStrbufInitStatic(&options->barColorTotal, terminalLightTheme ? FF_COLOR_FG_WHITE : FF_COLOR_FG_LIGHT_WHITE);
+    ffStrbufInitStatic(&options->barColorBorder, terminalLightTheme ? FF_COLOR_FG_WHITE : FF_COLOR_FG_LIGHT_WHITE);
     options->barWidth = 10;
 
     options->durationAbbreviation = false;
@@ -877,8 +998,8 @@ void ffOptionsInitDisplay(FFOptionsDisplay* options) {
     options->percentType = FF_PERCENTAGE_TYPE_NUM_BIT | FF_PERCENTAGE_TYPE_NUM_COLOR_BIT;
     options->percentNdigits = 0;
     ffStrbufInitStatic(&options->percentColorGreen, FF_COLOR_FG_GREEN);
-    ffStrbufInitStatic(&options->percentColorYellow, instance.state.terminalLightTheme ? FF_COLOR_FG_YELLOW : FF_COLOR_FG_LIGHT_YELLOW);
-    ffStrbufInitStatic(&options->percentColorRed, instance.state.terminalLightTheme ? FF_COLOR_FG_RED : FF_COLOR_FG_LIGHT_RED);
+    ffStrbufInitStatic(&options->percentColorYellow, terminalLightTheme ? FF_COLOR_FG_YELLOW : FF_COLOR_FG_LIGHT_YELLOW);
+    ffStrbufInitStatic(&options->percentColorRed, terminalLightTheme ? FF_COLOR_FG_RED : FF_COLOR_FG_LIGHT_RED);
     options->percentSpaceBeforeUnit = FF_SPACE_BEFORE_UNIT_DEFAULT;
     options->percentWidth = 0;
 
@@ -898,12 +1019,68 @@ void ffOptionsDestroyDisplay(FFOptionsDisplay* options) {
     ffStrbufDestroy(&options->keyValueSeparator);
     ffStrbufDestroy(&options->barCharElapsed);
     ffStrbufDestroy(&options->barCharTotal);
+    ffStrbufDestroy(&options->barBorderLeft);
+    ffStrbufDestroy(&options->barBorderRight);
+    ffStrbufDestroy(&options->barBorderLeftElapsed);
+    ffStrbufDestroy(&options->barBorderRightElapsed);
+    ffStrbufDestroy(&options->barColorElapsed);
+    ffStrbufDestroy(&options->barColorTotal);
+    ffStrbufDestroy(&options->barColorBorder);
+    ffStrbufDestroy(&options->tempColorGreen);
+    ffStrbufDestroy(&options->tempColorYellow);
+    ffStrbufDestroy(&options->tempColorRed);
+    ffStrbufDestroy(&options->percentColorGreen);
+    ffStrbufDestroy(&options->percentColorYellow);
+    ffStrbufDestroy(&options->percentColorRed);
     FF_LIST_FOR_EACH (FFstrbuf, item, options->constants) {
         ffStrbufDestroy(item);
     }
     ffListDestroy(&options->constants);
 }
 
+// `names` is indexed by the enum value, so its order must match the enum declaration. A value outside
+// the array adds no key at all, which is what the exhaustive switches this replaces did.
+static void optionAddEnumString(yyjson_mut_doc* doc, yyjson_mut_val* obj, const char* key, const char* const names[], size_t count, uint32_t value) {
+    if (value < count) {
+        yyjson_mut_obj_add_str(doc, obj, key, names[value]);
+    }
+}
+
+static void optionAddSpaceBeforeUnit(yyjson_mut_doc* doc, yyjson_mut_val* obj, FFSpaceBeforeUnitType type) {
+    static const char* const names[] = {"default", "always", "never"};
+    optionAddEnumString(doc, obj, "spaceBeforeUnit", names, sizeof(names) / sizeof(*names), type);
+}
+
+// @returns the language code for offsetof(FFModuleDisplayName, <language>), or nullptr if unknown
+// @see optionParseLanguageString
+static const char* optionGetLanguageString(uint32_t offset) {
+    switch (offset) {
+        case offsetof(FFModuleDisplayName, en): return "en";
+        case offsetof(FFModuleDisplayName, ar): return "ar";
+        case offsetof(FFModuleDisplayName, cs): return "cs";
+        case offsetof(FFModuleDisplayName, de): return "de";
+        case offsetof(FFModuleDisplayName, es): return "es";
+        case offsetof(FFModuleDisplayName, fi): return "fi";
+        case offsetof(FFModuleDisplayName, fr): return "fr";
+        case offsetof(FFModuleDisplayName, gl): return "gl";
+        case offsetof(FFModuleDisplayName, he): return "he";
+        case offsetof(FFModuleDisplayName, id): return "id";
+        case offsetof(FFModuleDisplayName, it): return "it";
+        case offsetof(FFModuleDisplayName, ja): return "ja";
+        case offsetof(FFModuleDisplayName, ko): return "ko";
+        case offsetof(FFModuleDisplayName, pl): return "pl";
+        case offsetof(FFModuleDisplayName, pt): return "pt";
+        case offsetof(FFModuleDisplayName, ru): return "ru";
+        case offsetof(FFModuleDisplayName, tr): return "tr";
+        case offsetof(FFModuleDisplayName, uk): return "uk";
+        case offsetof(FFModuleDisplayName, vi): return "vi";
+        case offsetof(FFModuleDisplayName, zh_CN): return "zh_CN";
+        case offsetof(FFModuleDisplayName, zh_TW): return "zh_TW";
+    }
+    return nullptr;
+}
+
+[[gnu::cold]]
 void ffOptionsGenerateDisplayJsonConfig(FFdata* data, FFOptionsDisplay* options) {
     yyjson_mut_doc* doc = data->resultDoc;
     yyjson_mut_val* obj = yyjson_mut_obj_add_obj(doc, doc->root, "display");
@@ -937,20 +1114,11 @@ void ffOptionsGenerateDisplayJsonConfig(FFdata* data, FFOptionsDisplay* options)
     {
         yyjson_mut_val* duration = yyjson_mut_obj_add_obj(doc, obj, "duration");
         yyjson_mut_obj_add_bool(doc, duration, "abbreviation", options->durationAbbreviation);
-        switch (options->durationSpaceBeforeUnit) {
-            case FF_SPACE_BEFORE_UNIT_DEFAULT:
-                yyjson_mut_obj_add_str(doc, duration, "spaceBeforeUnit", "default");
-                break;
-            case FF_SPACE_BEFORE_UNIT_ALWAYS:
-                yyjson_mut_obj_add_str(doc, duration, "spaceBeforeUnit", "always");
-                break;
-            case FF_SPACE_BEFORE_UNIT_NEVER:
-                yyjson_mut_obj_add_str(doc, duration, "spaceBeforeUnit", "never");
-                break;
-        }
+        optionAddSpaceBeforeUnit(doc, duration, options->durationSpaceBeforeUnit);
     }
 
     {
+        static const char* const binaryPrefixNames[] = {"iec", "si", "jedec"};
         yyjson_mut_val* size = yyjson_mut_obj_add_obj(doc, obj, "size");
         yyjson_mut_obj_add_str(doc, size, "maxPrefix", ((const char*[]) {
                                                            "B",
@@ -963,47 +1131,15 @@ void ffOptionsGenerateDisplayJsonConfig(FFdata* data, FFOptionsDisplay* options)
                                                            "ZB",
                                                            "YB",
                                                        })[options->sizeMaxPrefix]);
-        switch (options->sizeBinaryPrefix) {
-            case FF_SIZE_BINARY_PREFIX_TYPE_IEC:
-                yyjson_mut_obj_add_str(doc, size, "binaryPrefix", "iec");
-                break;
-            case FF_SIZE_BINARY_PREFIX_TYPE_SI:
-                yyjson_mut_obj_add_str(doc, size, "binaryPrefix", "si");
-                break;
-            case FF_SIZE_BINARY_PREFIX_TYPE_JEDEC:
-                yyjson_mut_obj_add_str(doc, size, "binaryPrefix", "jedec");
-                break;
-        }
+        optionAddEnumString(doc, size, "binaryPrefix", binaryPrefixNames, sizeof(binaryPrefixNames) / sizeof(*binaryPrefixNames), options->sizeBinaryPrefix);
         yyjson_mut_obj_add_uint(doc, size, "ndigits", options->sizeNdigits);
-        switch (options->sizeSpaceBeforeUnit) {
-            case FF_SPACE_BEFORE_UNIT_DEFAULT:
-                yyjson_mut_obj_add_str(doc, size, "spaceBeforeUnit", "default");
-                break;
-            case FF_SPACE_BEFORE_UNIT_ALWAYS:
-                yyjson_mut_obj_add_str(doc, size, "spaceBeforeUnit", "always");
-                break;
-            case FF_SPACE_BEFORE_UNIT_NEVER:
-                yyjson_mut_obj_add_str(doc, size, "spaceBeforeUnit", "never");
-                break;
-        }
+        optionAddSpaceBeforeUnit(doc, size, options->sizeSpaceBeforeUnit);
     }
 
     {
+        static const char* const tempUnitNames[] = {"D", "C", "F", "K"};
         yyjson_mut_val* temperature = yyjson_mut_obj_add_obj(doc, obj, "temp");
-        switch (options->tempUnit) {
-            case FF_TEMPERATURE_UNIT_DEFAULT:
-                yyjson_mut_obj_add_str(doc, temperature, "unit", "D");
-                break;
-            case FF_TEMPERATURE_UNIT_CELSIUS:
-                yyjson_mut_obj_add_str(doc, temperature, "unit", "C");
-                break;
-            case FF_TEMPERATURE_UNIT_FAHRENHEIT:
-                yyjson_mut_obj_add_str(doc, temperature, "unit", "F");
-                break;
-            case FF_TEMPERATURE_UNIT_KELVIN:
-                yyjson_mut_obj_add_str(doc, temperature, "unit", "K");
-                break;
-        }
+        optionAddEnumString(doc, temperature, "unit", tempUnitNames, sizeof(tempUnitNames) / sizeof(*tempUnitNames), options->tempUnit);
         yyjson_mut_obj_add_uint(doc, temperature, "ndigits", options->tempNdigits);
         {
             yyjson_mut_val* color = yyjson_mut_obj_add_obj(doc, temperature, "color");
@@ -1011,17 +1147,7 @@ void ffOptionsGenerateDisplayJsonConfig(FFdata* data, FFOptionsDisplay* options)
             yyjson_mut_obj_add_strbuf(doc, color, "yellow", &options->tempColorYellow);
             yyjson_mut_obj_add_strbuf(doc, color, "red", &options->tempColorRed);
         }
-        switch (options->tempSpaceBeforeUnit) {
-            case FF_SPACE_BEFORE_UNIT_DEFAULT:
-                yyjson_mut_obj_add_str(doc, temperature, "spaceBeforeUnit", "default");
-                break;
-            case FF_SPACE_BEFORE_UNIT_ALWAYS:
-                yyjson_mut_obj_add_str(doc, temperature, "spaceBeforeUnit", "always");
-                break;
-            case FF_SPACE_BEFORE_UNIT_NEVER:
-                yyjson_mut_obj_add_str(doc, temperature, "spaceBeforeUnit", "never");
-                break;
-        }
+        optionAddSpaceBeforeUnit(doc, temperature, options->tempSpaceBeforeUnit);
     }
 
     {
@@ -1051,17 +1177,7 @@ void ffOptionsGenerateDisplayJsonConfig(FFdata* data, FFOptionsDisplay* options)
             yyjson_mut_obj_add_strbuf(doc, color, "yellow", &options->percentColorYellow);
             yyjson_mut_obj_add_strbuf(doc, color, "red", &options->percentColorRed);
         }
-        switch (options->percentSpaceBeforeUnit) {
-            case FF_SPACE_BEFORE_UNIT_DEFAULT:
-                yyjson_mut_obj_add_str(doc, percent, "spaceBeforeUnit", "default");
-                break;
-            case FF_SPACE_BEFORE_UNIT_ALWAYS:
-                yyjson_mut_obj_add_str(doc, percent, "spaceBeforeUnit", "always");
-                break;
-            case FF_SPACE_BEFORE_UNIT_NEVER:
-                yyjson_mut_obj_add_str(doc, percent, "spaceBeforeUnit", "never");
-                break;
-        }
+        optionAddSpaceBeforeUnit(doc, percent, options->percentSpaceBeforeUnit);
         yyjson_mut_obj_add_uint(doc, percent, "width", options->percentWidth);
     }
 
@@ -1087,6 +1203,7 @@ void ffOptionsGenerateDisplayJsonConfig(FFdata* data, FFOptionsDisplay* options)
     }
 
     {
+        static const char* const trailingZerosNames[] = {"default", "always", "never"};
         yyjson_mut_val* fraction = yyjson_mut_obj_add_obj(doc, obj, "fraction");
 
         if (options->fractionNdigits < 0) {
@@ -1095,17 +1212,7 @@ void ffOptionsGenerateDisplayJsonConfig(FFdata* data, FFOptionsDisplay* options)
             yyjson_mut_obj_add_uint(doc, fraction, "ndigits", (uint8_t) options->fractionNdigits);
         }
 
-        switch (options->fractionTrailingZeros) {
-            case FF_FRACTION_TRAILING_ZEROS_TYPE_DEFAULT:
-                yyjson_mut_obj_add_str(doc, fraction, "trailingZeros", "default");
-                break;
-            case FF_FRACTION_TRAILING_ZEROS_TYPE_ALWAYS:
-                yyjson_mut_obj_add_str(doc, fraction, "trailingZeros", "always");
-                break;
-            case FF_FRACTION_TRAILING_ZEROS_TYPE_NEVER:
-                yyjson_mut_obj_add_str(doc, fraction, "trailingZeros", "never");
-                break;
-        }
+        optionAddEnumString(doc, fraction, "trailingZeros", trailingZerosNames, sizeof(trailingZerosNames) / sizeof(*trailingZerosNames), options->fractionTrailingZeros);
     }
 
     yyjson_mut_obj_add_bool(doc, obj, "noBuffer", options->noBuffer);
@@ -1141,22 +1248,17 @@ void ffOptionsGenerateDisplayJsonConfig(FFdata* data, FFOptionsDisplay* options)
         }
 
         yyjson_mut_obj_add_uint(doc, key, "paddingLeft", options->keyPaddingLeft);
+
+        const char* language = optionGetLanguageString(options->keyLanguage);
+        if (language != nullptr) {
+            yyjson_mut_obj_add_str(doc, key, "language", language);
+        }
     }
 
     {
         yyjson_mut_val* freq = yyjson_mut_obj_add_obj(doc, obj, "freq");
         yyjson_mut_obj_add_int(doc, freq, "ndigits", options->freqNdigits);
-        switch (options->freqSpaceBeforeUnit) {
-            case FF_SPACE_BEFORE_UNIT_DEFAULT:
-                yyjson_mut_obj_add_str(doc, freq, "spaceBeforeUnit", "default");
-                break;
-            case FF_SPACE_BEFORE_UNIT_ALWAYS:
-                yyjson_mut_obj_add_str(doc, freq, "spaceBeforeUnit", "always");
-                break;
-            case FF_SPACE_BEFORE_UNIT_NEVER:
-                yyjson_mut_obj_add_str(doc, freq, "spaceBeforeUnit", "never");
-                break;
-        }
+        optionAddSpaceBeforeUnit(doc, freq, options->freqSpaceBeforeUnit);
     }
 
     {

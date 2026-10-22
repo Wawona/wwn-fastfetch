@@ -7,31 +7,50 @@
 
 #include <math.h>
 
-static int sortByNameAsc(FFDisplayResult* a, FFDisplayResult* b) {
-    return ffStrbufComp(&a->name, &b->name);
+static int sortByNameAsc(const void* a, const void* b) {
+    return ffStrbufComp(&((const FFDisplayResult*) a)->name, &((const FFDisplayResult*) b)->name);
 }
 
-static int sortByNameDesc(FFDisplayResult* a, FFDisplayResult* b) {
-    return -ffStrbufComp(&a->name, &b->name);
+static int sortByNameDesc(const void* a, const void* b) {
+    return -ffStrbufComp(&((const FFDisplayResult*) a)->name, &((const FFDisplayResult*) b)->name);
 }
 
-bool ffPrintDisplay(FFDisplayOptions* options) {
-    const FFDisplayServerResult* dsResult = ffConnectDisplayServer();
-
-    if (dsResult->displays.length == 0) {
-        ffPrintError(FF_DISPLAY_MODULE_NAME, 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "Couldn't detect display");
-        return false;
+// `ffConnectDisplayServer()` hands out a process-wide result that other modules read too: `Monitor`
+// prints the same list, and `Brightness` pairs its own readings with these entries by position. It
+// must therefore not be reordered in place, which is what this module used to do through a cast
+// that dropped `const`. Sort a copy instead, so both the text and the JSON path get the requested
+// order without any other consumer seeing it.
+//
+// The copy is shallow: the entries keep owning their `FFstrbuf`s through the original result, and
+// it is never destroyed element-wise, so only the array itself is freed.
+static FFlist getOrderedDisplays(const FFDisplayOptions* options) {
+    const FFlist* displays = &ffConnectDisplayServer()->displays;
+    FFlist result = ffListCreateA(sizeof(FFDisplayResult), displays->length);
+    if (displays->length > 0) {
+        memcpy(result.data, displays->data, (size_t) displays->length * sizeof(FFDisplayResult));
+        result.length = displays->length;
     }
 
     if (options->order != FF_DISPLAY_ORDER_NONE) {
-        ffListSort((FFlist*) &dsResult->displays, sizeof(FFDisplayResult), (void*) (options->order == FF_DISPLAY_ORDER_ASC ? sortByNameAsc : sortByNameDesc));
+        ffListSort(&result, sizeof(FFDisplayResult), options->order == FF_DISPLAY_ORDER_ASC ? sortByNameAsc : sortByNameDesc);
+    }
+
+    return result;
+}
+
+bool ffPrintDisplay(FFDisplayOptions* options) {
+    FF_LIST_AUTO_DESTROY displays = getOrderedDisplays(options);
+
+    if (displays.length == 0) {
+        ffPrintError(FF_MODULE_GET_DISPLAY_NAME(Display), 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "Couldn't detect display");
+        return false;
     }
 
     if (options->compactType != FF_DISPLAY_COMPACT_TYPE_NONE) {
-        ffPrintLogoAndKey(FF_DISPLAY_MODULE_NAME, 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT);
+        ffPrintLogoAndKey(FF_MODULE_GET_DISPLAY_NAME(Display), 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT);
 
         FF_STRBUF_AUTO_DESTROY buffer = ffStrbufCreate();
-        FF_LIST_FOR_EACH (FFDisplayResult, result, dsResult->displays) {
+        FF_LIST_FOR_EACH (FFDisplayResult, result, displays) {
             if (options->compactType & FF_DISPLAY_COMPACT_TYPE_ORIGINAL_BIT) {
                 ffStrbufAppendF(&buffer, "%ix%i", result->width, result->height);
             } else {
@@ -42,7 +61,7 @@ bool ffPrintDisplay(FFDisplayOptions* options) {
 
             if (options->compactType & FF_DISPLAY_COMPACT_TYPE_REFRESH_RATE_BIT) {
                 if (result->refreshRate > 0) {
-                    const char* space = instance.config.display.freqSpaceBeforeUnit == FF_SPACE_BEFORE_UNIT_ALWAYS ? " " : "";
+                    const char* space = instance.config.display.freqSpaceBeforeUnit != FF_SPACE_BEFORE_UNIT_NEVER ? " " : "";
                     if (options->preciseRefreshRate) {
                         ffStrbufAppendF(&buffer, " @ %g%sHz", result->refreshRate, space);
                     } else {
@@ -62,20 +81,20 @@ bool ffPrintDisplay(FFDisplayOptions* options) {
 
     FF_STRBUF_AUTO_DESTROY key = ffStrbufCreate();
 
-    for (uint32_t i = 0; i < dsResult->displays.length; i++) {
-        FFDisplayResult* result = FF_LIST_GET(FFDisplayResult, dsResult->displays, i);
-        uint32_t moduleIndex = dsResult->displays.length == 1 ? 0 : i + 1;
-        const char* displayType = result->type == FF_DISPLAY_TYPE_UNKNOWN ? NULL : result->type == FF_DISPLAY_TYPE_BUILTIN ? "Built-in"
+    for (uint32_t i = 0; i < displays.length; i++) {
+        FFDisplayResult* result = FF_LIST_GET(FFDisplayResult, displays, i);
+        uint32_t moduleIndex = displays.length == 1 ? 0 : i + 1;
+        const char* displayType = result->type == FF_DISPLAY_TYPE_UNKNOWN ? nullptr : result->type == FF_DISPLAY_TYPE_BUILTIN ? "Built-in"
                                                                                                                            : "External";
 
         ffStrbufClear(&key);
         if (options->moduleArgs.key.length == 0) {
             if (result->name.length) {
-                ffStrbufAppendF(&key, "%s (%s)", FF_DISPLAY_MODULE_NAME, result->name.chars);
+                ffStrbufAppendF(&key, "%s (%s)", FF_MODULE_GET_DISPLAY_NAME(Display), result->name.chars);
             } else if (moduleIndex > 0) {
-                ffStrbufAppendF(&key, "%s (%d)", FF_DISPLAY_MODULE_NAME, moduleIndex);
+                ffStrbufAppendF(&key, "%s (%d)", FF_MODULE_GET_DISPLAY_NAME(Display), moduleIndex);
             } else {
-                ffStrbufAppendS(&key, FF_DISPLAY_MODULE_NAME);
+                ffStrbufAppendS(&key, FF_MODULE_GET_DISPLAY_NAME(Display));
             }
         } else {
             FF_PARSE_FORMAT_STRING_CHECKED(&key, &options->moduleArgs.key, ((FFformatarg[]) {
@@ -83,6 +102,7 @@ bool ffPrintDisplay(FFDisplayOptions* options) {
                                                                                FF_ARG(result->name, "name"),
                                                                                FF_ARG(displayType, "type"),
                                                                                FF_ARG(options->moduleArgs.keyIcon, "icon"),
+                                                                               FF_ARG(FF_MODULE_GET_DISPLAY_NAME(Display), "module-name"),
                                                                            }));
         }
 
@@ -166,14 +186,6 @@ bool ffPrintDisplay(FFDisplayOptions* options) {
                 preferredRefreshRate[0] = 0;
             }
 
-            char buf[32];
-            if (result->serial) {
-                const uint8_t* nums = (uint8_t*) &result->serial;
-                snprintf(buf, ARRAY_SIZE(buf), "%2X-%2X-%2X-%2X", nums[0], nums[1], nums[2], nums[3]);
-            } else {
-                buf[0] = '\0';
-            }
-
             FF_PRINT_FORMAT_CHECKED(key.chars, 0, &options->moduleArgs, FF_PRINT_TYPE_NO_CUSTOM_KEY, ((FFformatarg[]) {
                                                                                                          FF_ARG(result->width, "width"),
                                                                                                          FF_ARG(result->height, "height"),
@@ -192,7 +204,7 @@ bool ffPrintDisplay(FFDisplayOptions* options) {
                                                                                                          FF_ARG(hdrEnabled, "hdr-enabled"),
                                                                                                          FF_ARG(result->manufactureYear, "manufacture-year"),
                                                                                                          FF_ARG(result->manufactureWeek, "manufacture-week"),
-                                                                                                         FF_ARG(buf, "serial"),
+                                                                                                         FF_ARG(result->serial, "serial"),
                                                                                                          FF_ARG(result->platformApi, "platform-api"),
                                                                                                          FF_ARG(hdrCompatible, "hdr-compatible"),
                                                                                                          FF_ARG(scaleFactor, "scale-factor"),
@@ -229,7 +241,7 @@ void ffParseDisplayJsonObject(FFDisplayOptions* options, yyjson_val* module) {
                                                                            {},
                                                                        });
                 if (error) {
-                    ffPrintError(FF_DISPLAY_MODULE_NAME, 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "Invalid %s value: %s", unsafe_yyjson_get_str(key), error);
+                    ffPrintError(FF_MODULE_GET_DISPLAY_NAME(Display), 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "Invalid %s value: %s", unsafe_yyjson_get_str(key), error);
                 } else {
                     options->compactType = (FFDisplayCompactType) value;
                 }
@@ -254,7 +266,7 @@ void ffParseDisplayJsonObject(FFDisplayOptions* options, yyjson_val* module) {
                                                                            {},
                                                                        });
                 if (error) {
-                    ffPrintError(FF_DISPLAY_MODULE_NAME, 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "Invalid %s value: %s", unsafe_yyjson_get_str(key), error);
+                    ffPrintError(FF_MODULE_GET_DISPLAY_NAME(Display), 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "Invalid %s value: %s", unsafe_yyjson_get_str(key), error);
                 } else {
                     options->order = (FFDisplayOrder) value;
                 }
@@ -262,10 +274,11 @@ void ffParseDisplayJsonObject(FFDisplayOptions* options, yyjson_val* module) {
             continue;
         }
 
-        ffPrintError(FF_DISPLAY_MODULE_NAME, 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "Unknown JSON key %s", unsafe_yyjson_get_str(key));
+        ffPrintError(FF_MODULE_GET_DISPLAY_NAME(Display), 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "Unknown JSON key %s", unsafe_yyjson_get_str(key));
     }
 }
 
+[[gnu::cold]]
 void ffGenerateDisplayJsonConfig(FFDisplayOptions* options, yyjson_mut_doc* doc, yyjson_mut_val* module) {
     ffJsonConfigGenerateModuleArgsConfig(doc, module, &options->moduleArgs);
 
@@ -302,16 +315,16 @@ void ffGenerateDisplayJsonConfig(FFDisplayOptions* options, yyjson_mut_doc* doc,
     }
 }
 
-bool ffGenerateDisplayJsonResult(FF_A_UNUSED FFDisplayOptions* options, yyjson_mut_doc* doc, yyjson_mut_val* module) {
-    const FFDisplayServerResult* dsResult = ffConnectDisplayServer();
+bool ffGenerateDisplayJsonResult(FFDisplayOptions* options, yyjson_mut_doc* doc, yyjson_mut_val* module) {
+    FF_LIST_AUTO_DESTROY displays = getOrderedDisplays(options);
 
-    if (dsResult->displays.length == 0) {
+    if (displays.length == 0) {
         yyjson_mut_obj_add_str(doc, module, "error", "Couldn't detect display");
         return false;
     }
 
     yyjson_mut_val* arr = yyjson_mut_obj_add_arr(doc, module, "result");
-    FF_LIST_FOR_EACH (FFDisplayResult, item, dsResult->displays) {
+    FF_LIST_FOR_EACH (FFDisplayResult, item, displays) {
         yyjson_mut_val* obj = yyjson_mut_arr_add_obj(doc, arr);
         yyjson_mut_obj_add_uint(doc, obj, "id", item->id);
         yyjson_mut_obj_add_strbuf(doc, obj, "name", &item->name);
@@ -395,8 +408,8 @@ bool ffGenerateDisplayJsonResult(FF_A_UNUSED FFDisplayOptions* options, yyjson_m
             yyjson_mut_obj_add_null(doc, obj, "manufactureDate");
         }
 
-        if (item->serial) {
-            yyjson_mut_obj_add_uint(doc, obj, "serial", item->serial);
+        if (item->serial.length) {
+            yyjson_mut_obj_add_strbuf(doc, obj, "serial", &item->serial);
         } else {
             yyjson_mut_obj_add_null(doc, obj, "serial");
         }
@@ -419,8 +432,31 @@ void ffDestroyDisplayOptions(FFDisplayOptions* options) {
 }
 
 FFModuleBaseInfo ffDisplayModuleInfo = {
-    .name = FF_DISPLAY_MODULE_NAME,
+    .name = "Display",
     .description = "Print resolutions, refresh rates, etc",
+    .displayName = {
+        .en = "Display",
+        .ar = "الشاشة",
+        .cs = "Displej",
+        .de = "Anzeige",
+        .es = "Pantalla",
+        .fi = "Näyttö",
+        .fr = "Écran",
+        .gl = "Pantalla",
+        .he = "תצוגה",
+        .id = "Tampilan",
+        .it = "Display",
+        .ja = "ディスプレイ",
+        .ko = "디스플레이",
+        .pl = "Wyświetlacz",
+        .pt = "Tela",
+        .ru = "Дисплей",
+        .tr = "Ekran",
+        .uk = "Дисплей",
+        .vi = "Hiển thị",
+        .zh_CN = "显示器",
+        .zh_TW = "顯示器",
+    },
     .initOptions = (void*) ffInitDisplayOptions,
     .destroyOptions = (void*) ffDestroyDisplayOptions,
     .parseJsonObject = (void*) ffParseDisplayJsonObject,
@@ -433,8 +469,8 @@ FFModuleBaseInfo ffDisplayModuleInfo = {
         { "Screen configured refresh rate (in Hz)", "refresh-rate" },
         { "Screen scaled width (in pixels)", "scaled-width" },
         { "Screen scaled height (in pixels)", "scaled-height" },
-        { "Screen name", "name" },
-        { "Screen type (Built-in or External)", "type" },
+        { "Screen name *", "name" },
+        { "Screen type (Built-in or External) *", "type" },
         { "Screen rotation (in degrees)", "rotation" },
         { "True if being the primary screen", "is-primary" },
         { "Screen physical width (in millimeters)", "physical-width" },
@@ -453,5 +489,6 @@ FFModuleBaseInfo ffDisplayModuleInfo = {
         { "Screen preferred height (in pixels)", "preferred-height" },
         { "Screen preferred refresh rate (in Hz)", "preferred-refresh-rate" },
         { "DPI", "dpi" },
-    }))
+    })),
+    .defaultOrder = 17,
 };

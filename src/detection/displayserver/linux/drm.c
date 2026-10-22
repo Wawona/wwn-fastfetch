@@ -11,7 +11,7 @@ static const char* drmParseSysfs(FFDisplayServerResult* result) {
     const char* drmDirPath = "/sys/class/drm/";
 
     FF_AUTO_CLOSE_DIR DIR* dirp = opendir(drmDirPath);
-    if (dirp == NULL) {
+    if (dirp == nullptr) {
         return "opendir(drmDirPath) failed";
     }
 
@@ -21,7 +21,7 @@ static const char* drmParseSysfs(FFDisplayServerResult* result) {
     uint32_t drmDirLength = drmDir.length;
 
     struct dirent* entry;
-    while ((entry = readdir(dirp)) != NULL) {
+    while ((entry = readdir(dirp)) != nullptr) {
         if (entry->d_name[0] == '.') {
             continue;
         }
@@ -44,8 +44,8 @@ static const char* drmParseSysfs(FFDisplayServerResult* result) {
             }
         }
 
-        unsigned width = 0, height = 0, physicalWidth = 0, physicalHeight = 0;
-        double refreshRate = 0;
+        uint32_t width = 0, height = 0, physicalWidth = 0, physicalHeight = 0, preferredWidth = 0, preferredHeight = 0;
+        double preferredRefreshRate = 0;
         FF_STRBUF_AUTO_DESTROY name = ffStrbufCreate();
 
         ffStrbufSubstrBefore(&drmDir, drmDirWithDnameLength);
@@ -59,33 +59,35 @@ static const char* drmParseSysfs(FFDisplayServerResult* result) {
             }
         }
 
-        uint8_t edidData[512];
-        ssize_t edidLength = ffReadFileData(drmDir.chars, ARRAY_SIZE(edidData), edidData);
-        if (edidLength <= 0 || edidLength % 128 != 0) {
-            edidLength = 0;
-            ffStrbufSubstrBefore(&drmDir, drmDirWithDnameLength);
-            ffStrbufAppendS(&drmDir, "/modes");
+        ffStrbufSubstrBefore(&drmDir, drmDirWithDnameLength);
+        ffStrbufAppendS(&drmDir, "/modes");
 
-            char modes[32];
-            if (ffReadFileData(drmDir.chars, ARRAY_SIZE(modes), modes) >= 3) {
-                sscanf(modes, "%ux%u", &width, &height);
-                ffStrbufAppendS(&name, plainName);
-            }
-        } else {
+        char modes[32];
+        if (ffReadFileData(drmDir.chars, ARRAY_SIZE(modes), modes) >= 3) {
+            // This is actually preferred resolution
+            sscanf(modes, "%ux%u", &width, &height);
+            ffStrbufAppendS(&name, plainName);
+        }
+
+        uint8_t edidData[1024];
+        ssize_t edidLength = ffReadFileData(drmDir.chars, ARRAY_SIZE(edidData), edidData);
+        if (edidLength > 0 && ffEdidIsValid(edidData, (uint32_t) edidLength)) {
             ffEdidGetName(edidData, &name);
-            ffEdidGetPreferredResolutionAndRefreshRate(edidData, &width, &height, &refreshRate);
+            ffEdidGetPreferredResolutionAndRefreshRate(edidData, &preferredWidth, &preferredHeight, &preferredRefreshRate);
             ffEdidGetPhysicalSize(edidData, &physicalWidth, &physicalHeight);
+        } else {
+            edidLength = 0;
         }
 
         FFDisplayResult* item = ffdsAppendDisplay(
             result,
             width,
             height,
-            refreshRate,
             0,
             0,
-            0,
-            0,
+            preferredWidth,
+            preferredHeight,
+            preferredRefreshRate,
             0,
             &name,
             ffdsGetDisplayType(plainName),
@@ -96,13 +98,14 @@ static const char* drmParseSysfs(FFDisplayServerResult* result) {
             "sysfs-drm");
         if (item && edidLength) {
             item->hdrStatus = ffEdidGetHdrCompatible(edidData, (uint32_t) edidLength) ? FF_DISPLAY_HDR_STATUS_SUPPORTED : FF_DISPLAY_HDR_STATUS_UNSUPPORTED;
-            ffEdidGetSerialAndManufactureDate(edidData, &item->serial, &item->manufactureYear, &item->manufactureWeek);
+            ffEdidGetManufactureDate(edidData, &item->manufactureYear, &item->manufactureWeek);
+            ffEdidGetSerial(edidData, &item->serial);
         }
 
         ffStrbufSubstrBefore(&drmDir, drmDirLength);
     }
 
-    return NULL;
+    return nullptr;
 }
 #endif
 
@@ -172,11 +175,11 @@ static inline const char* drmType2Name(uint32_t connector_type) {
     }
 }
 
-FF_A_UNUSED static const char* drmGetEdidByConnId(uint32_t connId, uint8_t* edidData, ssize_t* edidLength) {
+[[maybe_unused]] static const char* drmGetEdidByConnId(uint32_t connId, uint8_t* edidData, ssize_t* edidLength) {
     const char* drmDirPath = "/sys/class/drm/";
 
     FF_AUTO_CLOSE_DIR DIR* dirp = opendir(drmDirPath);
-    if (dirp == NULL) {
+    if (dirp == nullptr) {
         return "opendir(drmDirPath) failed";
     }
 
@@ -186,7 +189,7 @@ FF_A_UNUSED static const char* drmGetEdidByConnId(uint32_t connId, uint8_t* edid
     uint32_t drmDirLength = drmDir.length;
 
     struct dirent* entry;
-    while ((entry = readdir(dirp)) != NULL) {
+    while ((entry = readdir(dirp)) != nullptr) {
         if (entry->d_name[0] == '.') {
             continue;
         }
@@ -198,7 +201,7 @@ FF_A_UNUSED static const char* drmGetEdidByConnId(uint32_t connId, uint8_t* edid
 
         ffStrbufAppendS(&drmDir, "/connector_id");
         ffReadFileData(drmDir.chars, ARRAY_SIZE(connectorId), connectorId);
-        if (strtoul(connectorId, NULL, 10) != connId) {
+        if (strtoul(connectorId, nullptr, 10) != connId) {
             ffStrbufSubstrBefore(&drmDir, drmDirLength);
             continue;
         }
@@ -206,7 +209,7 @@ FF_A_UNUSED static const char* drmGetEdidByConnId(uint32_t connId, uint8_t* edid
         ffStrbufSubstrBefore(&drmDir, drmDirWithDnameLength);
         ffStrbufAppendS(&drmDir, "/edid");
         *edidLength = ffReadFileData(drmDir.chars, (uint32_t) *edidLength, edidData);
-        return NULL;
+        return nullptr;
     }
 
     return "Failed to match connector ID";
@@ -214,7 +217,7 @@ FF_A_UNUSED static const char* drmGetEdidByConnId(uint32_t connId, uint8_t* edid
 
 static const char* drmConnectLibdrm(FFDisplayServerResult* result) {
     FF_AUTO_CLOSE_DIR DIR* dirp = opendir("/dev/dri/");
-    if (dirp == NULL) {
+    if (dirp == nullptr) {
         return "opendir(/dev/dri/) failed";
     }
     int drifd = dirfd(dirp);
@@ -222,7 +225,7 @@ static const char* drmConnectLibdrm(FFDisplayServerResult* result) {
     int nSuccess = 0;
 
     struct dirent* entry;
-    while ((entry = readdir(dirp)) != NULL) {
+    while ((entry = readdir(dirp)) != nullptr) {
         if (entry->d_name[0] == '.' || !ffStrStartsWith(entry->d_name, "card")) {
             continue;
         }
@@ -327,7 +330,7 @@ static const char* drmConnectLibdrm(FFDisplayServerResult* result) {
 
             FF_STRBUF_AUTO_DESTROY name = ffStrbufCreate();
             uint16_t myear = 0, mweak = 0;
-            uint32_t serial = 0;
+            FF_STRBUF_AUTO_DESTROY serial = ffStrbufCreate();
             FFDisplayHdrStatus hdrStatus = FF_DISPLAY_HDR_STATUS_UNKNOWN;
 
             uint32_t* props = malloc(conn.count_props * sizeof(uint32_t));
@@ -363,7 +366,8 @@ static const char* drmConnectLibdrm(FFDisplayServerResult* result) {
                                 if (ioctl(primaryFd, DRM_IOCTL_MODE_GETPROPBLOB, &blob) >= 0 && ffEdidIsValid(blobData, blob.length)) {
                                     ffEdidGetName(blobData, &name);
                                     hdrStatus = ffEdidGetHdrCompatible(blobData, blob.length) ? FF_DISPLAY_HDR_STATUS_SUPPORTED : FF_DISPLAY_HDR_STATUS_UNSUPPORTED;
-                                    ffEdidGetSerialAndManufactureDate(blobData, &serial, &myear, &mweak);
+                                    ffEdidGetManufactureDate(blobData, &myear, &mweak);
+                                    ffEdidGetSerial(blobData, &serial);
                                 }
                             }
                             break;
@@ -377,17 +381,18 @@ static const char* drmConnectLibdrm(FFDisplayServerResult* result) {
                 uint8_t edidData[512];
                 ssize_t edidLength = 0;
                 drmGetEdidByConnId(conn.connector_id, edidData, &edidLength);
-                if (edidLength > 0 && edidLength % 128 == 0) {
+                if (edidLength > 0 && ffEdidIsValid(edidData, (uint32_t) edidLength)) {
                     ffEdidGetName(edidData, &name);
                     hdrStatus = ffEdidGetHdrCompatible(edidData, (uint32_t) edidLength) ? FF_DISPLAY_HDR_STATUS_SUPPORTED : FF_DISPLAY_HDR_STATUS_UNSUPPORTED;
-                    ffEdidGetSerialAndManufactureDate(edidData, &serial, &myear, &mweak);
+                    ffEdidGetManufactureDate(edidData, &myear, &mweak);
+                    ffEdidGetSerial(edidData, &serial);
                 }
             }
     #endif
 
             if (name.length == 0) {
                 const char* connectorTypeName = drmType2Name(conn.connector_type);
-                if (connectorTypeName == NULL) {
+                if (connectorTypeName == nullptr) {
                     connectorTypeName = "Unknown";
                 }
                 ffStrbufSetF(&name, "%s-%d", connectorTypeName, iConn + 1);
@@ -416,7 +421,7 @@ static const char* drmConnectLibdrm(FFDisplayServerResult* result) {
 
             if (item) {
                 item->hdrStatus = hdrStatus;
-                item->serial = serial;
+                ffStrbufInitMove(&item->serial, &serial);
                 item->manufactureYear = myear;
                 item->manufactureWeek = mweak;
                 item->bitDepth = bitDepth;
@@ -424,16 +429,16 @@ static const char* drmConnectLibdrm(FFDisplayServerResult* result) {
         }
     }
 
-    return nSuccess > 0 ? NULL : "No connectors found using libdrm";
+    return nSuccess > 0 ? nullptr : "No connectors found using libdrm";
 }
 
 #endif
 
-const char* ffdsConnectDrm(FF_A_UNUSED FFDisplayServerResult* result) {
+const char* ffdsConnectDrm([[maybe_unused]] FFDisplayServerResult* result) {
 #if FF_HAVE_DRM
     if (instance.config.general.dsForceDrm != FF_DS_FORCE_DRM_TYPE_SYSFS_ONLY) {
-        if (drmConnectLibdrm(result) == NULL) {
-            return NULL;
+        if (drmConnectLibdrm(result) == nullptr) {
+            return nullptr;
         }
     }
 #endif

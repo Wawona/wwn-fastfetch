@@ -181,6 +181,26 @@ static const FFlogo A[] = {
         .colorTitle = FF_COLOR_FG_CYAN,
     },
     #endif
+    #ifdef FASTFETCH_DATATEXT_LOGO_ALT_ATOMIC
+    // ALT Atomic
+    {
+        .names = { "alt-atomic" },
+        .lines = FASTFETCH_DATATEXT_LOGO_ALT_ATOMIC,
+        .colors = {
+            FF_COLOR_FG_RGB "79;157;207",
+            FF_COLOR_FG_RGB "113;174;213",
+            FF_COLOR_FG_RGB "61;120;158",
+            FF_COLOR_FG_RGB "244;250;252",
+            FF_COLOR_FG_RGB "207;230;243",
+            FF_COLOR_FG_RGB "29;58;76",
+            FF_COLOR_FG_RGB "213;201;181",
+            FF_COLOR_FG_RGB "150;180;193",
+            FF_COLOR_FG_RGB "161;204;230",
+        },
+        .colorKeys = FF_COLOR_FG_RGB "80;157;207",
+        .colorTitle = FF_COLOR_FG_RGB "255;209;164",
+    },
+    #endif
     #ifdef FASTFETCH_DATATEXT_LOGO_ALTLINUX
     // ALTLinux
     {
@@ -633,6 +653,30 @@ static const FFlogo A[] = {
         .colorTitle = FF_COLOR_FG_CYAN,
     },
     #endif
+    #ifdef FASTFETCH_DATATEXT_LOGO_ARTIX2
+    // Artix2
+    {
+        .names = { "artix2" },
+        .lines = FASTFETCH_DATATEXT_LOGO_ARTIX2,
+        .colors = {
+            FF_COLOR_FG_CYAN,
+        },
+        .colorKeys = FF_COLOR_FG_CYAN,
+        .colorTitle = FF_COLOR_FG_CYAN,
+    },
+    #endif
+    #ifdef FASTFETCH_DATATEXT_LOGO_ARTIX3
+    // Artix3
+    {
+        .names = { "artix3" },
+        .lines = FASTFETCH_DATATEXT_LOGO_ARTIX3,
+        .colors = {
+            FF_COLOR_FG_CYAN,
+        },
+        .colorKeys = FF_COLOR_FG_CYAN,
+        .colorTitle = FF_COLOR_FG_CYAN,
+    },
+    #endif
     #ifdef FASTFETCH_DATATEXT_LOGO_ARTIX_SMALL
     // ArtixSmall
     {
@@ -804,7 +848,7 @@ static const FFlogo A[] = {
     #ifdef FASTFETCH_DATATEXT_LOGO_JANUSLINUX
     // Ataraxia
     {
-        .names = { "Ataraxia Linux", "Ataraxia" },
+        .names = { "Ataraxia" }, // New name of JanusLinux
         .lines = FASTFETCH_DATATEXT_LOGO_JANUSLINUX,
         .colors = {
             FF_COLOR_FG_BLUE,
@@ -873,6 +917,31 @@ static const FFlogo A[] = {
         .colors = {
             FF_COLOR_FG_CYAN,
             FF_COLOR_FG_RED,
+        },
+    },
+    #endif
+    #ifdef FASTFETCH_DATATEXT_LOGO_AZURELINUX
+    // AzureLinux
+    {
+        .names = { "AzureLinux" },
+        .lines = FASTFETCH_DATATEXT_LOGO_AZURELINUX,
+        .colors = {
+            FF_COLOR_FG_GREEN,
+            FF_COLOR_FG_BLUE,
+            FF_COLOR_FG_WHITE, // konsole...
+        },
+    },
+    #endif
+    #ifdef FASTFETCH_DATATEXT_LOGO_AZURELINUX2
+    // AzureLinux2
+    {
+        .names = { "AzureLinux2" },
+        .type = FF_LOGO_LINE_TYPE_ALTER_BIT,
+        .lines = FASTFETCH_DATATEXT_LOGO_AZURELINUX2,
+        .colors = {
+            FF_COLOR_FG_GREEN,
+            FF_COLOR_FG_BLUE,
+            FF_COLOR_FG_WHITE, // konsole...
         },
     },
     #endif

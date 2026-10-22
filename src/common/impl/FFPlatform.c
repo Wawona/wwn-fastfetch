@@ -18,6 +18,7 @@ void ffPlatformInit(FFPlatform* platform) {
 
 #ifdef _WIN32
     ffStrbufInit(&platform->sid);
+    platform->initCP = 0;
 #endif
 
     FFPlatformSysinfo* info = &platform->sysinfo;
@@ -26,7 +27,7 @@ void ffPlatformInit(FFPlatform* platform) {
     ffStrbufInit(&info->release);
     ffStrbufInit(&info->version);
     ffStrbufInit(&info->architecture);
-    info->pageSize = 0;
+    info->pageSizeShift = 12; // 4096, reasonable fallback
 
     ffPlatformInitImpl(platform);
 

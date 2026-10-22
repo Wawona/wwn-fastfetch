@@ -1,4 +1,5 @@
 #include "wallpaper.h"
+#include "common/debug.h"
 #include "common/io.h"
 #include "common/settings.h"
 #include "detection/displayserver/displayserver.h"
@@ -19,9 +20,9 @@ static const char* detectCosmicComp(FFstrbuf* result) {
 
         if (!ffStrbufEqualS(&cleaned, "[]")) {
             const char* firstQuote = strchr(backgrounds.chars, '"');
-            if (firstQuote != NULL) {
+            if (firstQuote != nullptr) {
                 const char* secondQuote = strchr(firstQuote + 1, '"');
-                if (secondQuote != NULL && secondQuote > firstQuote + 1) {
+                if (secondQuote != nullptr && secondQuote > firstQuote + 1) {
                     ffStrbufAppendNS(&monitorName, (uint32_t) (secondQuote - firstQuote - 1), firstQuote + 1);
                     sharedWallpaper = false;
                 }
@@ -39,16 +40,19 @@ static const char* detectCosmicComp(FFstrbuf* result) {
 
     FF_STRBUF_AUTO_DESTROY output = ffStrbufCreate();
     if (!ffReadFileBuffer(path.chars, &output)) {
+        FF_DEBUG("Failed to read \"%s\"", path.chars);
         return "Failed to read COSMIC wallpaper config";
     }
 
     const char* sourceStart = strstr(output.chars, "source:");
-    if (sourceStart == NULL) {
+    if (sourceStart == nullptr) {
+        FF_DEBUG("The COSMIC wallpaper config does not contain \"source:\"");
         return "COSMIC wallpaper config doesn't contain source";
     }
 
     const char* pathStart = strstr(sourceStart, "Path(");
-    if (pathStart == NULL) {
+    if (pathStart == nullptr) {
+        FF_DEBUG("The COSMIC wallpaper source does not contain \"Path(\"");
         return "COSMIC wallpaper source is not a Path value";
     }
 
@@ -58,27 +62,38 @@ static const char* detectCosmicComp(FFstrbuf* result) {
     }
 
     if (*pathStart != '\'' && *pathStart != '"') {
+        FF_DEBUG("The COSMIC wallpaper Path does not start with a quote");
         return "COSMIC wallpaper Path format is invalid";
     }
 
     char quote = *pathStart;
     ++pathStart;
     const char* pathEnd = strchr(pathStart, quote);
-    if (pathEnd == NULL || pathEnd == pathStart) {
+    if (pathEnd == nullptr || pathEnd == pathStart) {
+        FF_DEBUG("The COSMIC wallpaper path is empty");
         return "COSMIC wallpaper path is empty";
     }
 
     ffStrbufAppendNS(result, (uint32_t) (pathEnd - pathStart), pathStart);
-    return NULL;
+    return nullptr;
 }
 
-const char* ffDetectWallpaper(FFstrbuf* result) {
+// Android compiles this file next to wallpaper_android.c, which owns ffDetectWallpaper and calls
+// this one only while the display server is not SurfaceFlinger -- so the entry point has to step
+// aside there. Same arrangement as terminalfont_linux.c and terminalfont_android.c.
+const char*
+#ifdef __ANDROID__
+ffDetectWallpaperLinux
+#else
+ffDetectWallpaper
+#endif
+    (FFstrbuf* result) {
     const FFDisplayServerResult* wm = ffConnectDisplayServer();
     if (ffStrbufIgnCaseEqualS(&wm->wmPrettyName, FF_WM_PRETTY_COSMIC_COMP)) {
         return detectCosmicComp(result);
     }
 
-    const FFstrbuf* wallpaper = NULL;
+    const FFstrbuf* wallpaper = nullptr;
     const FFGTKResult* gtk = ffDetectGTK4();
     if (gtk->wallpaper.length) {
         wallpaper = &gtk->wallpaper;
@@ -90,6 +105,7 @@ const char* ffDetectWallpaper(FFstrbuf* result) {
     }
 
     if (!wallpaper) {
+        FF_DEBUG("Neither GTK nor Qt reported a wallpaper path");
         return "Failed to detect the current wallpaper path";
     }
 
@@ -98,5 +114,5 @@ const char* ffDetectWallpaper(FFstrbuf* result) {
     } else {
         ffStrbufAppend(result, wallpaper);
     }
-    return NULL;
+    return nullptr;
 }

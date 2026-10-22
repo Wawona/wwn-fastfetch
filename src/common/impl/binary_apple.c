@@ -1,7 +1,9 @@
 #include "common/binary.h"
+#include "common/debug.h"
 #include "common/io.h"
 #include "common/strutil.h"
 
+#include <errno.h>
 #include <string.h>
 #include <fcntl.h>
 #include <sys/mman.h>
@@ -20,7 +22,7 @@ typedef struct {
 
 static inline void wrapMunmap(FFMemoryMapping* mapping) {
     assert(mapping);
-    if (mapping->data == NULL || mapping->data == MAP_FAILED) {
+    if (mapping->data == nullptr || mapping->data == MAP_FAILED) {
         return;
     }
     munmap((void*) mapping->data, mapping->length);
@@ -31,12 +33,12 @@ static inline void wrapMunmap(FFMemoryMapping* mapping) {
  */
 static inline const void* readData(const FFMemoryMapping* mapping, size_t size, off_t offset) {
     if (offset < 0) {
-        return NULL;
+        return nullptr;
     }
 
     size_t start = (size_t) offset;
     if (start > mapping->length || size > mapping->length - start) {
-        return NULL;
+        return nullptr;
     }
 
     return mapping->data + start;
@@ -99,7 +101,7 @@ static bool handleMachSection(const FFMemoryMapping* mapping, const char* name, 
  * @param userdata User data for the callback
  * @param minLength Minimum string length to extract
  *
- * @return NULL on success, error message on failure
+ * @return nullptr on success, error message on failure
  */
 static const char* dumpMachHeader(const FFMemoryMapping* mapping, off_t offset, bool is_64, bool (*cb)(const char* str, uint32_t len, void* userdata), void* userdata, uint32_t minLength) {
     uint32_t ncmds;
@@ -108,6 +110,7 @@ static const char* dumpMachHeader(const FFMemoryMapping* mapping, off_t offset, 
     if (is_64) {
         const struct mach_header_64* header = readData(mapping, sizeof(struct mach_header_64), offset);
         if (!header) {
+            FF_DEBUG("Failed to read the 64-bit mach header at offset %lld", (long long) offset);
             return "read mach header failed";
         }
 
@@ -116,6 +119,7 @@ static const char* dumpMachHeader(const FFMemoryMapping* mapping, off_t offset, 
     } else {
         const struct mach_header* header = readData(mapping, sizeof(struct mach_header), offset);
         if (!header) {
+            FF_DEBUG("Failed to read the mach header at offset %lld", (long long) offset);
             return "read mach header failed";
         }
 
@@ -124,7 +128,7 @@ static const char* dumpMachHeader(const FFMemoryMapping* mapping, off_t offset, 
     }
 
     off_t commandOffset = loadCommandsOffset;
-    const struct load_command* cmd = NULL;
+    const struct load_command* cmd = nullptr;
     for (uint32_t i = 0U; i < ncmds; i++, commandOffset += cmd->cmdsize) {
         cmd = readData(mapping, sizeof(*cmd), commandOffset);
         if (!cmd) {
@@ -153,7 +157,7 @@ static const char* dumpMachHeader(const FFMemoryMapping* mapping, off_t offset, 
                 }
 
                 if (!handleMachSection(mapping, section->sectname, (off_t) section->offset, (size_t) section->size, cb, userdata, minLength)) {
-                    return NULL;
+                    return nullptr;
                 }
             }
         } else if (cmd->cmd == LC_SEGMENT) {
@@ -174,13 +178,13 @@ static const char* dumpMachHeader(const FFMemoryMapping* mapping, off_t offset, 
                 }
 
                 if (!handleMachSection(mapping, section->sectname, (off_t) section->offset, (size_t) section->size, cb, userdata, minLength)) {
-                    return NULL;
+                    return nullptr;
                 }
             }
         }
     }
 
-    return NULL;
+    return nullptr;
 }
 
 /**
@@ -195,11 +199,12 @@ static const char* dumpMachHeader(const FFMemoryMapping* mapping, off_t offset, 
  * @param userdata User data for the callback
  * @param minLength Minimum string length to extract
  *
- * @return NULL on success, error message on failure
+ * @return nullptr on success, error message on failure
  */
 static const char* dumpFatHeader(const FFMemoryMapping* mapping, bool (*cb)(const char* str, uint32_t len, void* userdata), void* userdata, uint32_t minLength) {
     const struct fat_header* headerRaw = readData(mapping, sizeof(struct fat_header), 0);
     if (!headerRaw) {
+        FF_DEBUG("Failed to read the fat header");
         return "read fat header failed";
     }
 
@@ -251,6 +256,7 @@ static const char* dumpFatHeader(const FFMemoryMapping* mapping, bool (*cb)(cons
             return dumpMachHeader(mapping, machHeaderOffset, *magic == MH_MAGIC_64, cb, userdata, minLength);
         }
     }
+    FF_DEBUG("No supported Mach-O slice was found in the fat binary");
     return "Unsupported fat header";
 }
 
@@ -265,25 +271,29 @@ static const char* dumpFatHeader(const FFMemoryMapping* mapping, bool (*cb)(cons
 const char* ffBinaryExtractStrings(const char* machoFile, bool (*cb)(const char* str, uint32_t len, void* userdata), void* userdata, uint32_t minLength) {
     FF_AUTO_CLOSE_FD int fd = open(machoFile, O_RDONLY | O_CLOEXEC);
     if (fd < 0) {
+        FF_DEBUG("open(\"%s\") failed: %s", machoFile, strerror(errno));
         return "File could not be opened";
     }
 
     struct stat st;
     if (fstat(fd, &st) != 0 || st.st_size <= 0) {
+        FF_DEBUG("fstat(\"%s\") failed or the file is empty", machoFile);
         return "Failed to stat file";
     }
 
-    FF_A_CLEANUP(wrapMunmap) FFMemoryMapping mapping = {
-        .data = mmap(NULL, (size_t) st.st_size, PROT_READ, MAP_PRIVATE, fd, 0),
+    [[gnu::cleanup(wrapMunmap)]] FFMemoryMapping mapping = {
+        .data = mmap(nullptr, (size_t) st.st_size, PROT_READ, MAP_PRIVATE, fd, 0),
         .length = (size_t) st.st_size,
     };
     if (mapping.data == MAP_FAILED) {
+        FF_DEBUG("mmap(\"%s\", %lld bytes) failed: %s", machoFile, (long long) st.st_size, strerror(errno));
         return "mmap failed";
     }
 
     // Read the magic number to determine the type of binary
     const uint32_t* magic = readData(&mapping, sizeof(uint32_t), 0);
     if (!magic) {
+        FF_DEBUG("Failed to read the magic number");
         return "read magic number failed";
     }
 
@@ -291,6 +301,7 @@ const char* ffBinaryExtractStrings(const char* machoFile, bool (*cb)(const char*
     // MH_CIGAM and MH_CIGAM_64 seem to be no longer used, as `swap_mach_header` is marked as deprecated.
     // However FAT_CIGAM and FAT_CIGAM_64 are still used (/usr/bin/vim).
     if (*magic != MH_MAGIC && *magic != MH_MAGIC_64 && *magic != FAT_CIGAM && *magic != FAT_CIGAM_64 && *magic != FAT_MAGIC && *magic != FAT_MAGIC_64) {
+        FF_DEBUG("Unsupported magic number 0x%08x", (unsigned) *magic);
         return "Unsupported format or big endian mach-o file";
     }
 

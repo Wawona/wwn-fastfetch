@@ -8,23 +8,15 @@
 
 #include <ctype.h>
 #include <stdint.h>
-#ifdef __FreeBSD__
-    #include <paths.h>
-    #ifndef _PATH_LOCALBASE
-        #define _PATH_LOCALBASE "/usr/local"
-    #endif
-#elif __OpenBSD__
-    #define _PATH_LOCALBASE "/usr/local"
-#elif __NetBSD__
-    #define _PATH_LOCALBASE "/usr/pkg"
-#elif _WIN32
 
+#if _WIN32
+    #include "common/windows/registry.h"
     #include "common/windows/version.h"
     #include <windows.h>
 
 static bool getFileVersion(const FFstrbuf* exePath, const wchar_t* stringName, FFstrbuf* version) {
     wchar_t exePathW[PATH_MAX + 1];
-    if (!NT_SUCCESS(RtlUTF8ToUnicodeN(exePathW, (ULONG) sizeof(exePathW), NULL, exePath->chars, (ULONG) exePath->length + 1))) {
+    if (!NT_SUCCESS(RtlUTF8ToUnicodeN(exePathW, (ULONG) sizeof(exePathW), nullptr, exePath->chars, (ULONG) exePath->length + 1))) {
         return false;
     }
     return ffGetFileVersion(exePathW, stringName, version);
@@ -37,7 +29,7 @@ static bool getFileVersion(const FFstrbuf* exePath, const wchar_t* stringName, F
 #endif
 
 static bool getExeVersionRaw(FFstrbuf* exe, FFstrbuf* version) {
-    return ffProcessAppendStdOut(version, (char* const[]) { exe->chars, "--version", NULL }) == NULL;
+    return ffProcessAppendStdOut(version, (char* const[]) { exe->chars, "--version", nullptr }) == nullptr && version->length > 0;
 }
 
 static bool getExeVersionGeneral(FFstrbuf* exe, FFstrbuf* version) {
@@ -47,10 +39,10 @@ static bool getExeVersionGeneral(FFstrbuf* exe, FFstrbuf* version) {
 
     ffStrbufSubstrAfterFirstC(version, ' ');
     ffStrbufSubstrBeforeFirstC(version, ' ');
-    return true;
+    return version->length > 0;
 }
 
-static bool extractBashVersion(const char* line, FF_A_UNUSED uint32_t len, void* userdata) {
+static bool extractBashVersion(const char* line, [[maybe_unused]] uint32_t len, void* userdata) {
     if (!ffStrStartsWith(line, "@(#)Bash version ")) {
         return true;
     }
@@ -88,7 +80,14 @@ static bool getShellVersionFish(FFstrbuf* exe, FFstrbuf* version) {
     if (version->length < strlen("fish, v") || !ffStrbufStartsWithS(version, "fish")) {
         return false;
     }
-    uint32_t index = ffStrbufNextIndexC(version, strlen("fish, "), ' ');
+    uint32_t index = ffStrbufFirstIndexC(version, ' '); // skip "fish,"
+    while (index + 1 < version->length && !ffCharIsDigit(version->chars[index + 1])) {
+        index = ffStrbufNextIndexC(version, index + 1, ' '); // skip "version"
+    }
+    if (index + 1 >= version->length) {
+        return false;
+    }
+
     ffStrbufSubstrAfter(version, index);
     ffStrbufSubstrBeforeFirstC(version, ' ');
     return true;
@@ -104,7 +103,7 @@ static bool getShellVersionPwsh(FFstrbuf* exe, FFstrbuf* version) {
     }
 
 #ifdef _WIN32
-    if (getFileVersion(exe, NULL, version)) {
+    if (getFileVersion(exe, nullptr, version)) {
         ffStrbufSubstrBeforeLastC(version, '.');
         return true;
     }
@@ -119,28 +118,168 @@ static bool getShellVersionPwsh(FFstrbuf* exe, FFstrbuf* version) {
 }
 
 static bool getShellVersionKsh(FFstrbuf* exe, FFstrbuf* version) {
-    if (ffProcessAppendStdErr(version, (char* const[]) { exe->chars, "--version", NULL }) == NULL && ffStrbufSubstrAfterFirstS(version, " (AT&T Research) ")) {
-        // version         sh (AT&T Research) 93u+ 2012-08-01
-        ffStrbufSubstrBeforeFirstC(version, ' ');
-        return true;
+    ffStrbufClear(version);
+
+    // ksh93 has used both stderr and stdout for --version, and the exit
+    // status is not consistent across releases. Parse any captured output
+    // before trying the next probe.
+    for (int attempt = 0; attempt < 4; ++attempt) {
+        ffStrbufClear(version);
+        if (attempt < 2 && (ffStrbufEndsWithS(exe, "mksh") || ffStrbufEndsWithS(exe, "pdksh") || ffStrbufEndsWithS(exe, "oksh")))
+            continue;
+
+        if (attempt == 0) {
+            ffProcessAppendStdErr(version, (char* const[]) { exe->chars, "--version", nullptr });
+        } else if (attempt == 1) {
+            ffProcessAppendStdOut(version, (char* const[]) { exe->chars, "--version", nullptr });
+        } else if (attempt == 2) {
+            ffProcessAppendStdOut(version, (char* const[]) {
+                exe->chars,
+                "-c",
+                "printf '%s\\n' \"${KSH_VERSION:-${SH_VERSION:-}}\"",
+                nullptr
+            });
+        } else {
+            ffProcessAppendStdOut(version, (char* const[]) {
+                exe->chars,
+                "-c",
+                "printf '%s\\n' \"${.sh.version}\"",
+                nullptr
+            });
+        }
+
+        const char* p = version->chars;
+        while (*p && isspace((unsigned char) *p))
+            ++p;
+        if (!*p)
+            continue;
+
+        // @(#)PD KSH v5.2.14, @(#)MIRBSD KSH R59, @(#)LEGACY KSH R59
+        if (ffStrStartsWith(p, "@(#)")) {
+            const char* marker = strstr(p, " KSH ");
+            if (!marker)
+                continue;
+
+            const char* start = marker + strlen(" KSH ");
+            while (*start && isspace((unsigned char) *start))
+                ++start;
+            const char* end = start;
+            while (*end && !isspace((unsigned char) *end))
+                ++end;
+
+            uint32_t length = (uint32_t) (end - start);
+            if (length > 1 && start[0] == 'v' && ffCharIsDigit(start[1])) {
+                ++start;
+                --length;
+            }
+            if (length == 0 || (!ffCharIsDigit(start[0]) && !(start[0] == 'R' && length > 1 && ffCharIsDigit(start[1]))))
+                continue;
+
+            ffStrbufSetNS(version, length, start);
+            return true;
+        }
+
+        const char* core = nullptr;
+        if (ffStrStartsWith(p, "version")) {
+            // ksh93 self-doc: version sh (AT&T [Labs] Research) ...
+            const char* selfDoc = strstr(p, " sh (");
+            const char* end = selfDoc ? strchr(selfDoc, ')') : nullptr;
+            if (!end)
+                continue;
+            core = end + 1;
+        } else if (ffStrStartsWith(p, "Version ")) {
+            // $KSH_VERSION / ${.sh.version}: Version <features> <version> <date>
+            core = p + strlen("Version ");
+        } else {
+            continue;
+        }
+
+        while (*core && isspace((unsigned char) *core))
+            ++core;
+
+        const char* token = core;
+        while (*token) {
+            while (*token && isspace((unsigned char) *token))
+                ++token;
+            if (!*token)
+                break;
+
+            const char* end = token;
+            while (*end && !isspace((unsigned char) *end))
+                ++end;
+            uint32_t length = (uint32_t) (end - token);
+
+            bool valid = false;
+            if (length >= 2 && token[0] == '9' && token[1] == '3') {
+                valid = true;
+                for (uint32_t i = 2; i < length; ++i) {
+                    char c = token[i];
+                    if (!(ffCharIsDigit(c) || ffCharIsEnglishAlphabet(c) || c == '+' || c == '.' || c == '_' || c == '/' || c == '-')) {
+                        valid = false;
+                        break;
+                    }
+                }
+            } else if (length >= 5 && token[0] == 'M' && token[1] == '-') {
+                for (uint32_t i = 2; i + 2 < length; ++i) {
+                    if (token[i] == '/' && token[i + 1] == '9' && token[i + 2] == '3') {
+                        valid = true;
+                        break;
+                    }
+                }
+            } else if (length > 0 && ffCharIsDigit(token[0]) && (memchr(token, '.', length) || memchr(token, '-', length))) {
+                valid = true;
+            } else if (length > 1 && token[0] == 'v' && ffCharIsDigit(token[1])) {
+                valid = true;
+            }
+
+            if (valid) {
+                uint32_t resultLength = length;
+                bool date = length >= 10 &&
+                             ffCharIsDigit(token[0]) && ffCharIsDigit(token[1]) &&
+                             ffCharIsDigit(token[2]) && ffCharIsDigit(token[3]) && token[4] == '-' &&
+                             ffCharIsDigit(token[5]) && ffCharIsDigit(token[6]) && token[7] == '-' &&
+                             ffCharIsDigit(token[8]) && ffCharIsDigit(token[9]);
+                if (date) {
+                    const char* next = end;
+                    while (*next && isspace((unsigned char) *next))
+                        ++next;
+                    const char* nextEnd = next;
+                    while (*nextEnd && !isspace((unsigned char) *nextEnd))
+                        ++nextEnd;
+                    uint32_t nextLength = (uint32_t) (nextEnd - next);
+                    if (nextLength > 0 && nextLength <= 2) {
+                        bool suffix = true;
+                        for (uint32_t i = 0; i < nextLength; ++i) {
+                            if (!ffCharIsEnglishAlphabet(next[i]) && next[i] != '+') {
+                                suffix = false;
+                                break;
+                            }
+                        }
+                        if (suffix)
+                            resultLength = (uint32_t) (nextEnd - token);
+                    }
+                }
+
+                const char* start = token;
+                if (resultLength > 1 && start[0] == 'v' && ffCharIsDigit(start[1])) {
+                    ++start;
+                    --resultLength;
+                }
+                ffStrbufSetNS(version, resultLength, start);
+                return version->length > 0;
+            }
+
+            token = end;
+        }
     }
 
     ffStrbufClear(version);
-    if (ffProcessAppendStdOut(version, (char* const[]) { exe->chars, "-c", "echo $KSH_VERSION", NULL }) == NULL && ffStrbufSubstrAfterFirstS(version, " KSH ")) {
-        // OKSH: @(#)PD KSH v5.2.14 99/07/13.2
-        // MKSH: @(#)MIRBSD KSH R59 2025/04/26 +Debian
-        // $OKSH_VERSION doesn't exist on OpenBSD
-        ffStrbufSubstrBeforeFirstC(version, ' ');
-        ffStrbufTrimLeft(version, 'v');
-        return true;
-    }
-
     return false;
 }
 
 static bool getShellVersionOksh(FFstrbuf* exe, FFstrbuf* version) {
     // Homebrew version
-    if (ffProcessAppendStdOut(version, (char* const[]) { exe->chars, "-c", "echo $OKSH_VERSION", NULL }) != NULL) {
+    if (ffProcessAppendStdOut(version, (char* const[]) { exe->chars, "-c", "echo $OKSH_VERSION", nullptr }) != nullptr) {
         return false;
     }
 
@@ -150,7 +289,7 @@ static bool getShellVersionOksh(FFstrbuf* exe, FFstrbuf* version) {
 }
 
 static bool getShellVersionOils(FFstrbuf* exe, FFstrbuf* version) {
-    if (ffProcessAppendStdOut(version, (char* const[]) { exe->chars, "--version", NULL }) != NULL) {
+    if (ffProcessAppendStdOut(version, (char* const[]) { exe->chars, "--version", nullptr }) != nullptr) {
         return false;
     }
 
@@ -186,11 +325,14 @@ static bool extractBusyboxVersion(const char* line, uint32_t len, void* userdata
 
 static bool getShellVersionAsh(FFstrbuf* exe, FFstrbuf* version) {
     ffBinaryExtractStrings(exe->chars, extractBusyboxVersion, version, (uint32_t) strlen("BusyBox v0.0.0"));
+    if (version->length > 0) {
+        return true;
+    }
 
     const char* error = ffStrbufEndsWithS(exe, "busybox")
-        ? ffProcessAppendStdErr(version, (char* const[]) { exe->chars, "ash", "--help", NULL })
-        : ffProcessAppendStdErr(version, (char* const[]) { exe->chars, "--help", NULL });
-    if (error != NULL) {
+        ? ffProcessAppendStdErr(version, (char* const[]) { exe->chars, "ash", "--help", nullptr })
+        : ffProcessAppendStdErr(version, (char* const[]) { exe->chars, "--help", nullptr });
+    if (error != nullptr) {
         return false;
     }
 
@@ -201,14 +343,14 @@ static bool getShellVersionAsh(FFstrbuf* exe, FFstrbuf* version) {
     return true;
 }
 
-static bool getShellVersionXonsh(FF_A_UNUSED FFstrbuf* exe, FFstrbuf* version) {
+static bool getShellVersionXonsh([[maybe_unused]] FFstrbuf* exe, FFstrbuf* version) {
     ffStrbufSetS(version, getenv("XONSH_VERSION"));
     if (version->length) {
         return true;
     }
 
     // exe is python here
-    if (ffProcessAppendStdErr(version, (char* const[]) { "xonsh", "--version", NULL }) != NULL) {
+    if (ffProcessAppendStdErr(version, (char* const[]) { "xonsh", "--version", nullptr }) != nullptr) {
         return false;
     }
 
@@ -217,7 +359,7 @@ static bool getShellVersionXonsh(FF_A_UNUSED FFstrbuf* exe, FFstrbuf* version) {
     return true;
 }
 
-static bool extractZshVersion(const char* line, FF_A_UNUSED uint32_t len, void* userdata) {
+static bool extractZshVersion(const char* line, [[maybe_unused]] uint32_t len, void* userdata) {
     if (!ffStrStartsWith(line, "zsh-")) {
         return true;
     }
@@ -248,7 +390,13 @@ static bool getShellVersionWinPowerShell(FFstrbuf* exe, FFstrbuf* version) {
         return true;
     }
 
-    return ffProcessAppendStdOut(version, (char* const[]) { exe->chars, "-NoLogo", "-NoProfile", "-Command", "$PSVersionTable.PSVersion.ToString()", NULL }) == NULL;
+    FF_AUTO_CLOSE_FD HANDLE hKey = nullptr;
+    if (ffRegOpenSubkeyForRead(ffRegGetRootKeyHandle(HKEY_LOCAL_MACHINE), L"SOFTWARE\\Microsoft\\PowerShell\\3\\PowerShellEngine", &hKey, nullptr) && ffRegReadStrbuf(hKey, L"PowerShellVersion", version, nullptr)) {
+        return true;
+    }
+
+    // Extremely slow
+    return ffProcessAppendStdOut(version, (char* const[]) { exe->chars, "-NoLogo", "-NoProfile", "-Command", "$PSVersionTable.PSVersion.ToString()", nullptr }) == nullptr;
 }
 #endif
 
@@ -275,7 +423,7 @@ bool fftsGetShellVersion(FFstrbuf* exe, const char* exeName, FFstrbuf* version) 
     if (ffStrEqualsIgnCase(exeName, "nu")) {
         return getShellVersionNushell(exe, version);
     }
-    if (ffStrEqualsIgnCase(exeName, "ksh") || ffStrEqualsIgnCase(exeName, "mksh")) {
+    if (ffStrEqualsIgnCase(exeName, "ksh") || ffStrEqualsIgnCase(exeName, "ksh93") || ffStrEqualsIgnCase(exeName, "mksh") || ffStrEqualsIgnCase(exeName, "pdksh")) {
         return getShellVersionKsh(exe, version);
     }
     if (ffStrEqualsIgnCase(exeName, "oksh")) {
@@ -302,18 +450,18 @@ bool fftsGetShellVersion(FFstrbuf* exe, const char* exeName, FFstrbuf* version) 
         return getShellVersionWinPowerShell(exe, version);
     }
 
-    return getFileVersion(exe, NULL, version);
+    return getFileVersion(exe, nullptr, version);
 #endif
 
     return false;
 }
 
-FF_A_UNUSED static bool getTerminalVersionTermux(FFstrbuf* version) {
+[[maybe_unused]] static bool getTerminalVersionTermux(FFstrbuf* version) {
     ffStrbufSetS(version, getenv("TERMUX_VERSION"));
     return version->length > 0;
 }
 
-static bool extractGeneralVersion(const char* str, FF_A_UNUSED uint32_t len, void* userdata) {
+static bool extractGeneralVersion(const char* str, [[maybe_unused]] uint32_t len, void* userdata) {
     if (!ffCharIsDigit(str[0])) {
         return true;
     }
@@ -326,7 +474,7 @@ static bool extractGeneralVersion(const char* str, FF_A_UNUSED uint32_t len, voi
     return false;
 }
 
-FF_A_UNUSED static bool getTerminalVersionGnome(FFstrbuf* exe, FFstrbuf* version) {
+[[maybe_unused]] static bool getTerminalVersionGnome(FFstrbuf* exe, FFstrbuf* version) {
     if (ffIsAbsolutePath(exe->chars)) {
         ffBinaryExtractStrings(exe->chars, extractGeneralVersion, version, (uint32_t) strlen("0.0.0"));
         if (version->length) {
@@ -334,17 +482,18 @@ FF_A_UNUSED static bool getTerminalVersionGnome(FFstrbuf* exe, FFstrbuf* version
         }
     }
 
-    if (ffProcessAppendStdOut(version, (char* const[]) { "gnome-terminal", "--version", NULL })) {
+    if (ffProcessAppendStdOut(version, (char* const[]) { "gnome-terminal", "--version", nullptr })) {
         return false;
     }
 
     // # GNOME Terminal 3.46.7 using VTE 0.70.2 +BIDI +GNUTLS +ICU +SYSTEMD
-    ffStrbufSubstrAfterFirstS(version, "Terminal ");
+    if (!ffStrbufSubstrAfterFirstS(version, "Terminal "))
+        return false;
     ffStrbufSubstrBeforeFirstC(version, ' ');
-    return true;
+    return version->length > 0;
 }
 
-FF_A_UNUSED static bool getTerminalVersionXfce4Terminal(FFstrbuf* exe, FFstrbuf* version) {
+[[maybe_unused]] static bool getTerminalVersionXfce4Terminal(FFstrbuf* exe, FFstrbuf* version) {
     if (ffIsAbsolutePath(exe->chars)) {
         ffBinaryExtractStrings(exe->chars, extractGeneralVersion, version, (uint32_t) strlen("0.0.0"));
         if (version->length) {
@@ -355,23 +504,25 @@ FF_A_UNUSED static bool getTerminalVersionXfce4Terminal(FFstrbuf* exe, FFstrbuf*
     return getExeVersionGeneral(exe, version); // xfce4-terminal 1.0.4 (Xfce 4.18)...
 }
 
-FF_A_UNUSED static bool getTerminalVersionKgx(FFstrbuf* version) {
-    if (ffProcessAppendStdOut(version, (char* const[]) { "kgx", "--version", NULL })) {
+[[maybe_unused]] static bool getTerminalVersionKgx(FFstrbuf* version) {
+    if (ffProcessAppendStdOut(version, (char* const[]) { "kgx", "--version", nullptr })) {
         return false;
     }
 
     // # KGX 45.0 using VTE 0.74.0 +BIDI +GNUTLS +ICU +SYSTEMD
-    ffStrbufSubstrAfterFirstS(version, "KGX ");
+    if (!ffStrbufSubstrAfterFirstS(version, "KGX "))
+        return false;
     ffStrbufSubstrBeforeFirstC(version, ' ');
-    return true;
+    return version->length > 0;
 }
 
-FF_A_UNUSED static bool getTerminalVersionKonsole(FFstrbuf* exe, FFstrbuf* version) {
+[[maybe_unused]] static bool getTerminalVersionKonsole(FFstrbuf* exe, FFstrbuf* version) {
     const char* konsoleVersion = getenv("KONSOLE_VERSION");
     if (konsoleVersion) {
         // 221201
-        long major = strtol(konsoleVersion, NULL, 10);
-        if (major >= 0) {
+        char* end;
+        long major = strtol(konsoleVersion, &end, 10);
+        if (end != konsoleVersion && *end == '\0' && major >= 0) {
             long patch = major % 100;
             major /= 100;
             long minor = major % 100;
@@ -388,9 +539,9 @@ FF_A_UNUSED static bool getTerminalVersionKonsole(FFstrbuf* exe, FFstrbuf* versi
     return ffStrbufSubstrAfterLastC(version, ' ');
 }
 
-FF_A_UNUSED static bool getTerminalVersionFoot(FFstrbuf* exe, FFstrbuf* version) {
+[[maybe_unused]] static bool getTerminalVersionFoot(FFstrbuf* exe, FFstrbuf* version) {
     uint32_t major = 0, minor = 0, patch = 0;
-    if (ffGetTerminalResponse("\e[>c", 3, "\e[>1;%2u%2u%2u;0c", &major, &minor, &patch) == NULL) {
+    if (ffGetTerminalResponse("\e[>c", 3, "\e[>1;%2u%2u%2u;0c", &major, &minor, &patch) == nullptr) {
         ffStrbufSetF(version, "%u.%u.%u", major, minor, patch);
         return true;
     }
@@ -400,12 +551,13 @@ FF_A_UNUSED static bool getTerminalVersionFoot(FFstrbuf* exe, FFstrbuf* version)
     }
 
     // foot version: 1.13.1 -pgo +ime -graphemes -assertions
-    ffStrbufSubstrAfterFirstS(version, "version: ");
+    if (!ffStrbufSubstrAfterFirstS(version, "version: "))
+        return false;
     ffStrbufSubstrBeforeFirstC(version, ' ');
-    return true;
+    return version->length > 0;
 }
 
-FF_A_UNUSED static bool getTerminalVersionMateTerminal(FFstrbuf* exe, FFstrbuf* version) {
+[[maybe_unused]] static bool getTerminalVersionMateTerminal(FFstrbuf* exe, FFstrbuf* version) {
     ffBinaryExtractStrings(exe->chars, extractGeneralVersion, version, (uint32_t) strlen("0.0.0"));
     if (version->length > 0) {
         return true;
@@ -416,94 +568,102 @@ FF_A_UNUSED static bool getTerminalVersionMateTerminal(FFstrbuf* exe, FFstrbuf* 
     }
 
     // MATE Terminal 1.26.1
-    ffStrbufSubstrAfterLastC(version, ' ');
+    if (!ffStrbufSubstrAfterLastC(version, ' '))
+        return false;
     return version->length > 0;
 }
 
-FF_A_UNUSED static bool getTerminalVersionCockpit(FFstrbuf* exe, FFstrbuf* version) {
+[[maybe_unused]] static bool getTerminalVersionCockpit(FFstrbuf* exe, FFstrbuf* version) {
     if (!getExeVersionRaw(exe, version)) {
         return false;
     }
 
     // Version: 295\n...
     ffStrbufSubstrBeforeFirstC(version, '\n');
-    ffStrbufSubstrAfterFirstC(version, ' ');
+    if (!ffStrbufSubstrAfterFirstC(version, ' '))
+        return false;
     return version->length > 0;
 }
 
-FF_A_UNUSED static bool getTerminalVersionXterm(FFstrbuf* exe, FFstrbuf* version) {
+[[maybe_unused]] static bool getTerminalVersionXterm(FFstrbuf* exe, FFstrbuf* version) {
     ffStrbufSetS(version, getenv("XTERM_VERSION"));
     if (!version->length) {
-        if (ffProcessAppendStdOut(version, (char* const[]) { exe->chars, "-v", NULL })) {
+        if (ffProcessAppendStdOut(version, (char* const[]) { exe->chars, "-v", nullptr })) {
             return false;
         }
     }
 
     // xterm(273)
     ffStrbufTrimRight(version, ')');
-    ffStrbufSubstrAfterFirstC(version, '(');
+    if (!ffStrbufSubstrAfterFirstC(version, '('))
+        return false;
     return version->length > 0;
 }
 
-FF_A_UNUSED static bool getTerminalVersionBlackbox(FFstrbuf* exe, FFstrbuf* version) {
-    if (ffProcessAppendStdOut(version, (char* const[]) { exe->chars, "--version", NULL })) {
+[[maybe_unused]] static bool getTerminalVersionBlackbox(FFstrbuf* exe, FFstrbuf* version) {
+    if (ffProcessAppendStdOut(version, (char* const[]) { exe->chars, "--version", nullptr })) {
         return false;
     }
 
     // BlackBox version 0.14.0 (flatpak)
-    ffStrbufSubstrAfterFirstS(version, "version ");
+    if (!ffStrbufSubstrAfterFirstS(version, "version "))
+        return false;
     ffStrbufSubstrBeforeFirstC(version, ' ');
     return version->length > 0;
 }
 
-FF_A_UNUSED static bool getTerminalVersionUrxvt(FF_A_UNUSED FFstrbuf* exe, FFstrbuf* version) {
+[[maybe_unused]] static bool getTerminalVersionUrxvt([[maybe_unused]] FFstrbuf* exe, FFstrbuf* version) {
     if (ffProcessAppendStdErr(version, (char* const[]) { "urxvt", // Don't use exe because of urxvtd
                                            "-invalid",
-                                           NULL })) {
+                                           nullptr })) {
         return false;
     }
 
     // urxvt: "invalid": unknown or malformed option.
     // rxvt-unicode (urxvt) v9.31 - released: 2023-01-02
-    ffStrbufSubstrAfterFirstS(version, "(urxvt) v");
+    if (!ffStrbufSubstrAfterFirstS(version, "(urxvt) v"))
+        return false;
     ffStrbufSubstrBeforeFirstC(version, ' ');
 
     return version->length > 0;
 }
 
-FF_A_UNUSED static bool getTerminalVersionSt(FF_A_UNUSED FFstrbuf* exe, FFstrbuf* version) {
-    if (ffProcessAppendStdErr(version, (char* const[]) { exe->chars, "-v", NULL })) {
+[[maybe_unused]] static bool getTerminalVersionSt([[maybe_unused]] FFstrbuf* exe, FFstrbuf* version) {
+    if (ffProcessAppendStdErr(version, (char* const[]) { exe->chars, "-v", nullptr })) {
         return false;
     }
 
     // st 0.9
-    ffStrbufSubstrAfterFirstC(version, ' ');
+    if (!ffStrbufSubstrAfterFirstC(version, ' '))
+        return false;
 
     return version->length > 0;
 }
 
-FF_A_UNUSED static bool getTerminalVersionLxterminal(FFstrbuf* exe, FFstrbuf* version) {
+[[maybe_unused]] static bool getTerminalVersionLxterminal(FFstrbuf* exe, FFstrbuf* version) {
     if (!getExeVersionRaw(exe, version)) {
         return false;
     }
     // lxterminal 0.3.2
-    ffStrbufSubstrAfterFirstC(version, ' ');
+    if (!ffStrbufSubstrAfterFirstC(version, ' '))
+        return false;
     return version->length > 0;
 }
 
-FF_A_UNUSED static bool getTerminalVersionWeston(FF_A_UNUSED FFstrbuf* exe, FFstrbuf* version) {
+[[maybe_unused]] static bool getTerminalVersionWeston([[maybe_unused]] FFstrbuf* exe, FFstrbuf* version) {
     // weston-terminal doesn't report a version, use weston version instead
-    if (ffProcessAppendStdOut(version, (char* const[]) { "weston", "--version", NULL })) {
+    if (ffProcessAppendStdOut(version, (char* const[]) { "weston", "--version", nullptr })) {
         return false;
     }
 
     // weston 8.0.0
-    ffStrbufSubstrAfterFirstC(version, ' ');
+    if (!ffStrbufSubstrAfterFirstC(version, ' '))
+        return false;
 
     return version->length > 0;
 }
 
-FF_A_UNUSED static bool extractKmsconVersion(const char* str, FF_A_UNUSED uint32_t len, void* userdata) {
+[[maybe_unused]] static bool extractKmsconVersion(const char* str, [[maybe_unused]] uint32_t len, void* userdata) {
     if (!ffStrStartsWith(str, "v")) {
         return true;
     }
@@ -516,7 +676,7 @@ FF_A_UNUSED static bool extractKmsconVersion(const char* str, FF_A_UNUSED uint32
     return false;
 }
 
-FF_A_UNUSED static bool getTerminalVersionKmscon(FFstrbuf* exe, FFstrbuf* version) {
+[[maybe_unused]] static bool getTerminalVersionKmscon(FFstrbuf* exe, FFstrbuf* version) {
     if (ffIsAbsolutePath(exe->chars)) {
         ffBinaryExtractStrings(exe->chars, extractKmsconVersion, version, (uint32_t) strlen("v0.0.0"));
         if (version->length) {
@@ -529,21 +689,23 @@ FF_A_UNUSED static bool getTerminalVersionKmscon(FFstrbuf* exe, FFstrbuf* versio
     }
 
     // kmscon version v10.0.0
-    ffStrbufSubstrAfterLastC(version, ' ');
+    if (!ffStrbufSubstrAfterLastC(version, ' '))
+        return false;
     return version->length > 0;
 }
 
 static bool getTerminalVersionContour(FFstrbuf* exe, FFstrbuf* version) {
     const char* env = getenv("TERMINAL_VERSION_STRING");
-    if (env) {
+    if (env && *env) {
         ffStrbufAppendS(version, env);
-        return true;
+        return version->length > 0;
     }
     if (!getExeVersionRaw(exe, version)) {
         return false;
     }
     // Contour Terminal Emulator 0.3.12.262
-    ffStrbufSubstrAfterLastC(version, ' ');
+    if (!ffStrbufSubstrAfterLastC(version, ' '))
+        return false;
     return version->length > 0;
 }
 
@@ -552,18 +714,20 @@ static bool getTerminalVersionScreen(FFstrbuf* exe, FFstrbuf* version) {
         return false;
     }
     // Screen version 4.09.01 (GNU) 20-Aug-23
-    ffStrbufSubstrAfter(version, (uint32_t) strlen("Screen version ") - 1);
+    if (!ffStrbufSubstrAfterFirstS(version, "Screen version "))
+        return false;
     ffStrbufSubstrBeforeFirstC(version, ' ');
     return version->length > 0;
 }
 
 static bool getTerminalVersionTmux(FFstrbuf* exe, FFstrbuf* version) {
-    if (ffProcessAppendStdOut(version, (char* const[]) { exe->chars, "-V", NULL }) != NULL) {
+    if (ffProcessAppendStdOut(version, (char* const[]) { exe->chars, "-V", nullptr }) != nullptr) {
         return false;
     }
 
     // tmux 3.4
-    ffStrbufSubstrAfterFirstC(version, ' ');
+    if (!ffStrbufSubstrAfterFirstC(version, ' '))
+        return false;
     return version->length > 0;
 }
 
@@ -573,7 +737,8 @@ static bool getTerminalVersionZellij(FFstrbuf* exe, FFstrbuf* version) {
     }
 
     // zellij 0.39.2
-    ffStrbufSubstrAfterFirstC(version, ' ');
+    if (!ffStrbufSubstrAfterFirstC(version, ' '))
+        return false;
     return version->length > 0;
 }
 
@@ -586,17 +751,19 @@ static bool getTerminalVersionZed(FFstrbuf* exe, FFstrbuf* version) {
 #endif
     );
 
-    if (ffProcessAppendStdOut(version, (char* const[]) { cli.chars, "--version", NULL }) != NULL) {
+    if (ffProcessAppendStdOut(version, (char* const[]) { cli.chars, "--version", nullptr }) != nullptr) {
         return false;
     }
 
     // Zed 0.142.6 – /Applications/Zed.app
-    ffStrbufSubstrAfterFirstC(version, ' ');
+    if (!ffStrbufStartsWithS(version, "Zed "))
+        return false;
+    ffStrbufSubstrAfter(version, (uint32_t) strlen("Zed ") - 1);
     ffStrbufSubstrBeforeFirstC(version, ' ');
-    return true;
+    return version->length > 0;
 }
 
-static bool extractSshdVersion(const char* str, FF_A_UNUSED uint32_t len, void* userdata) {
+static bool extractSshdVersion(const char* str, [[maybe_unused]] uint32_t len, void* userdata) {
     if (!ffStrStartsWith(str, "OpenSSH_") || !ffCharIsDigit(str[strlen("OpenSSH_")])) {
         return true;
     }
@@ -614,7 +781,7 @@ static bool getTerminalVersionSshd(FFstrbuf* exe, FFstrbuf* version) {
     FF_STRBUF_AUTO_DESTROY exePath = ffStrbufCreate();
     if (ffIsAbsolutePath(exe->chars)) {
         ffStrbufSet(&exePath, exe);
-    } else if (ffFindExecutableInPath("sshd", &exePath) != NULL) {
+    } else if (ffFindExecutableInPath("sshd", &exePath) != nullptr) {
         return false;
     }
 
@@ -623,18 +790,22 @@ static bool getTerminalVersionSshd(FFstrbuf* exe, FFstrbuf* version) {
         return true;
     }
 
-    if (ffProcessAppendStdOut(version, (char* const[]) { exePath.chars, "-V", NULL }) != NULL) {
+    if (ffProcessAppendStdErr(version, (char* const[]) { exePath.chars, "-V", nullptr }) != nullptr) {
         return false;
     }
 
     if (ffStrbufStartsWithS(version, "unknown ")) { // `unknown option -- V` (ancient OpenSSH version)
-        ffStrbufSubstrAfterFirstC(version, '\n');
+        if (!ffStrbufSubstrAfterFirstC(version, '\n'))
+            return false;
     }
 
+    if (!ffStrbufStartsWithS(version, "OpenSSH_"))
+        return false;
+    ffStrbufSubstrAfter(version, (uint32_t) strlen("OpenSSH_") - 1);
+
     // OpenSSH_10.0p2 Ubuntu-5ubuntu5, OpenSSL 3.5.3 16 Sep 2025
-    ffStrbufSubstrAfterFirstC(version, '_');
     ffStrbufSubstrBeforeFirstC(version, ',');
-    return true;
+    return version->length > 0;
 }
 
 #ifndef _WIN32
@@ -646,7 +817,7 @@ static bool getTerminalVersionKitty(FFstrbuf* exe, FFstrbuf* version) {
         ffReadFileData(FASTFETCH_TARGET_DIR_USR "/lib64/kitty/kitty/constants.py", ARRAY_SIZE(buffer) - 1, buffer) ||
         ffReadFileData(FASTFETCH_TARGET_DIR_USR "/lib/kitty/kitty/constants.py", ARRAY_SIZE(buffer) - 1, buffer)
         #else
-        ffReadFileData(_PATH_LOCALBASE "/share/kitty/kitty/constants.py", ARRAY_SIZE(buffer) - 1, buffer)
+        ffReadFileData(FF_PATH_PKG_BASE "/share/kitty/kitty/constants.py", ARRAY_SIZE(buffer) - 1, buffer)
         #endif
     ) {
         // Starts from version 0.17.0
@@ -662,7 +833,7 @@ static bool getTerminalVersionKitty(FFstrbuf* exe, FFstrbuf* version) {
         }
     }
     #elif __APPLE__
-    if (ffGetAppNameAndVersion(exe->chars, NULL, version)) {
+    if (ffGetAppNameAndVersion(exe->chars, nullptr, version) && version->length > 0) {
         return true;
     }
     #endif
@@ -673,7 +844,7 @@ static bool getTerminalVersionKitty(FFstrbuf* exe, FFstrbuf* version) {
             "\eP+q6b697474792d71756572792d76657273696f6e\e\\", // kitty-query-version
             1,
             "\eP1+r%*[^=]=%63[^\e]\e\\\\",
-            versionHex) == NULL) {
+            versionHex) == nullptr) {
         // decode hex string
         for (const char* p = versionHex; p[0] && p[1]; p += 2) {
             unsigned value;
@@ -681,24 +852,26 @@ static bool getTerminalVersionKitty(FFstrbuf* exe, FFstrbuf* version) {
                 ffStrbufAppendC(version, (char) value);
             }
         }
-        return true;
+        if (version->length > 0)
+            return true;
     }
 
     // kitty 0.21.2 created by Kovid Goyal
     return getExeVersionGeneral(exe, version);
 }
 
-FF_A_UNUSED static bool getTerminalVersionPtyxis(FF_A_UNUSED FFstrbuf* exe, FFstrbuf* version) {
-    if (ffProcessAppendStdOut(version, (char* const[]) { "ptyxis", "--version", NULL }) != NULL) {
+[[maybe_unused]] static bool getTerminalVersionPtyxis([[maybe_unused]] FFstrbuf* exe, FFstrbuf* version) {
+    if (ffProcessAppendStdOut(version, (char* const[]) { "ptyxis", "--version", nullptr }) != nullptr) {
         return false;
     }
 
     ffStrbufSubstrBeforeFirstC(version, '\n');
-    ffStrbufSubstrAfterFirstC(version, ' ');
-    return true;
+    if (!ffStrbufSubstrAfterFirstC(version, ' '))
+        return false;
+    return version->length > 0;
 }
 
-FF_A_UNUSED static bool getTerminalVersionTilix(FFstrbuf* exe, FFstrbuf* version) {
+[[maybe_unused]] static bool getTerminalVersionTilix(FFstrbuf* exe, FFstrbuf* version) {
     if (ffIsAbsolutePath(exe->chars)) {
         ffBinaryExtractStrings(exe->chars, extractGeneralVersion, version, (uint32_t) strlen("0.0.0"));
         if (version->length) {
@@ -706,7 +879,7 @@ FF_A_UNUSED static bool getTerminalVersionTilix(FFstrbuf* exe, FFstrbuf* version
         }
     }
 
-    if (ffProcessAppendStdOut(version, (char* const[]) { exe->chars, "--version", NULL }) != NULL) {
+    if (ffProcessAppendStdOut(version, (char* const[]) { exe->chars, "--version", nullptr }) != nullptr) {
         return false;
     }
 
@@ -720,26 +893,28 @@ FF_A_UNUSED static bool getTerminalVersionTilix(FFstrbuf* exe, FFstrbuf* version
 
     ffStrbufSubstrBefore(version, end);
     ffStrbufSubstrAfter(version, index);
-    return true;
+    return version->length > 0;
 }
 
-FF_A_UNUSED static bool getTerminalVersionSakura(FFstrbuf* exe, FFstrbuf* version) {
-    if (ffProcessAppendStdErr(version, (char* const[]) { exe->chars, "--version", NULL }) != NULL) { // sakura version is 3.8.8
+[[maybe_unused]] static bool getTerminalVersionSakura(FFstrbuf* exe, FFstrbuf* version) {
+    if (ffProcessAppendStdErr(version, (char* const[]) { exe->chars, "--version", nullptr }) != nullptr) { // sakura version is 3.8.8
         return false;
     }
 
-    ffStrbufSubstrAfterLastC(version, ' ');
-    return true;
+    if (!ffStrbufSubstrAfterLastC(version, ' '))
+        return false;
+    return version->length > 0;
 }
 
-FF_A_UNUSED static bool getTerminalVersionTermite(FFstrbuf* exe, FFstrbuf* version) {
-    if (ffProcessAppendStdOut(version, (char* const[]) { exe->chars, "--version", NULL }) != NULL) { // termite v16.9\nvte 0.78.1 +BIDI +GNUTLS +ICU +SYSTEMD
+[[maybe_unused]] static bool getTerminalVersionTermite(FFstrbuf* exe, FFstrbuf* version) {
+    if (ffProcessAppendStdOut(version, (char* const[]) { exe->chars, "--version", nullptr }) != nullptr) { // termite v16.9\nvte 0.78.1 +BIDI +GNUTLS +ICU +SYSTEMD
         return false;
     }
 
     ffStrbufSubstrBeforeFirstC(version, '\n');
-    ffStrbufSubstrAfterLastC(version, 'v');
-    return true;
+    if (!ffStrbufSubstrAfterLastC(version, 'v'))
+        return false;
+    return version->length > 0;
 }
 #endif
 
@@ -750,12 +925,12 @@ static bool getTerminalVersionWindowsTerminal(FFstrbuf* exe, FFstrbuf* version) 
     ffStrbufInitNS(&buildInfoPath, ffStrbufLastIndexC(exe, '\\') + 1, exe->chars);
     ffStrbufAppendS(&buildInfoPath, "BuildInfo.xml");
 
-    if (ffParsePropFile(buildInfoPath.chars, "StoreVersion=\"", version)) {
+    if (ffParsePropFile(buildInfoPath.chars, "StoreVersion=\"", version) && version->length > 0) {
         ffStrbufTrimRight(version, '"');
-        return true;
+        return version->length > 0;
     }
 
-    return getFileVersion(exe, NULL, version);
+    return getFileVersion(exe, nullptr, version) && version->length > 0;
 }
 
 static bool getTerminalVersionConEmu(FFstrbuf* exe, FFstrbuf* version) {
@@ -765,12 +940,12 @@ static bool getTerminalVersionConEmu(FFstrbuf* exe, FFstrbuf* version) {
         return true;
     }
 
-    return getFileVersion(exe, NULL, version);
+    return getFileVersion(exe, nullptr, version) && version->length > 0;
 }
 
 #endif
 
-bool fftsGetTerminalVersion(FFstrbuf* processName, FF_A_UNUSED FFstrbuf* exe, FFstrbuf* version) {
+bool fftsGetTerminalVersion(FFstrbuf* processName, [[maybe_unused]] FFstrbuf* exe, FFstrbuf* version) {
 #ifdef __ANDROID__
 
     if (ffStrbufEqualS(processName, "com.termux")) {
@@ -889,7 +1064,7 @@ bool fftsGetTerminalVersion(FFstrbuf* processName, FF_A_UNUSED FFstrbuf* exe, FF
     }
 
     if (ffStrbufIgnCaseEqualS(processName, "warp.exe")) {
-        return getFileVersion(exe, L"ProductVersion", version);
+        return getFileVersion(exe, L"ProductVersion", version) && version->length > 0;
     }
 
 #endif
@@ -933,7 +1108,7 @@ bool fftsGetTerminalVersion(FFstrbuf* processName, FF_A_UNUSED FFstrbuf* exe, FF
 #endif
 
     const char* termProgramVersion = getenv("TERM_PROGRAM_VERSION");
-    if (termProgramVersion) {
+    if (termProgramVersion && *termProgramVersion) {
         const char* termProgram = getenv("TERM_PROGRAM");
         if (termProgram) {
             if (ffStrbufStartsWithIgnCaseS(processName, termProgram) || // processName ends with `.exe` on Windows
@@ -945,20 +1120,20 @@ bool fftsGetTerminalVersion(FFstrbuf* processName, FF_A_UNUSED FFstrbuf* exe, FF
 #endif
                 false) {
                 ffStrbufSetS(version, termProgramVersion);
-                return true;
+                return version->length > 0;
             }
         }
     }
 
     termProgramVersion = getenv("LC_TERMINAL_VERSION");
-    if (termProgramVersion) {
+    if (termProgramVersion && *termProgramVersion) {
         const char* termProgram = getenv("LC_TERMINAL");
         if (termProgram) {
             if (ffStrbufStartsWithIgnCaseS(processName, termProgram) || // processName ends with `.exe` on Windows
                 (ffStrEquals(termProgram, "vscode") && ffStrbufStartsWithIgnCaseS(processName, "code")) ||
                 (ffStrStartsWith(termProgram, "iTerm") && ffStrbufStartsWithIgnCaseS(processName, "iTermServer-"))) {
                 ffStrbufSetS(version, termProgramVersion);
-                return true;
+                return version->length > 0;
             }
         }
     }
@@ -973,11 +1148,11 @@ bool fftsGetTerminalVersion(FFstrbuf* processName, FF_A_UNUSED FFstrbuf* exe, FF
 
 #ifdef _WIN32
 
-    return getFileVersion(exe, NULL, version);
+    return getFileVersion(exe, nullptr, version) && version->length > 0;
 
 #elif __APPLE__
 
-    return ffGetAppNameAndVersion(exe->chars, NULL, version);
+    return ffGetAppNameAndVersion(exe->chars, nullptr, version) && version->length > 0;
 
 #else
 

@@ -1,6 +1,7 @@
 #define INITGUID
 
 #include "keyboard.h"
+#include "common/debug.h"
 #include "common/io.h"
 #include "common/mallocHelper.h"
 #include "common/windows/unicode.h"
@@ -12,15 +13,18 @@
 
 const char* ffDetectKeyboard(FFlist* devices /* List of FFKeyboardDevice */) {
     UINT nDevices = 0;
-    if (GetRawInputDeviceList(NULL, &nDevices, sizeof(RAWINPUTDEVICELIST))) {
-        return "GetRawInputDeviceList(NULL) failed";
+    if (GetRawInputDeviceList(nullptr, &nDevices, sizeof(RAWINPUTDEVICELIST))) {
+        FF_DEBUG("GetRawInputDeviceList(nullptr) failed: %s", ffDebugWin32Error(GetLastError()));
+        return "GetRawInputDeviceList(nullptr) failed";
     }
     if (nDevices == 0) {
+        FF_DEBUG("No HID devices found");
         return "No HID devices found";
     }
 
-    RAWINPUTDEVICELIST* FF_AUTO_FREE pRawInputDeviceList = (RAWINPUTDEVICELIST*) malloc(sizeof(RAWINPUTDEVICELIST) * nDevices);
+    FF_AUTO_FREE RAWINPUTDEVICELIST* pRawInputDeviceList = (RAWINPUTDEVICELIST*) malloc(sizeof(RAWINPUTDEVICELIST) * nDevices);
     if ((nDevices = GetRawInputDeviceList(pRawInputDeviceList, &nDevices, sizeof(RAWINPUTDEVICELIST))) == (UINT) -1) {
+        FF_DEBUG("GetRawInputDeviceList(pRawInputDeviceList) failed: %s", ffDebugWin32Error(GetLastError()));
         return "GetRawInputDeviceList(pRawInputDeviceList) failed";
     }
 
@@ -49,7 +53,7 @@ const char* ffDetectKeyboard(FFlist* devices /* List of FFKeyboardDevice */) {
 
         wchar_t buffer[MAX_PATH];
 
-        HANDLE FF_AUTO_CLOSE_FD hHidFile = CreateFileW(devName, 0 /* must be 0 instead of GENERIC_READ */, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+        FF_AUTO_CLOSE_FD HANDLE hHidFile = CreateFileW(devName, 0 /* must be 0 instead of GENERIC_READ */, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
         if (hHidFile != INVALID_HANDLE_VALUE) {
             if (HidD_GetProductString(hHidFile, buffer, (ULONG) sizeof(buffer))) {
                 ffStrbufSetWS(&device->name, buffer);
@@ -81,5 +85,5 @@ const char* ffDetectKeyboard(FFlist* devices /* List of FFKeyboardDevice */) {
         }
     }
 
-    return NULL;
+    return nullptr;
 }

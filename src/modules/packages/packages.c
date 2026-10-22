@@ -11,12 +11,12 @@ bool ffPrintPackages(FFPackagesOptions* options) {
     const char* error = ffDetectPackages(&counts, options);
 
     if (error) {
-        ffPrintError(FF_PACKAGES_MODULE_NAME, 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "%s", error);
+        ffPrintError(FF_MODULE_GET_DISPLAY_NAME(Packages), 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "%s", error);
         return false;
     }
 
     if (counts.all == 0) {
-        ffPrintError(FF_PACKAGES_MODULE_NAME, 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "No packages from known package managers found");
+        ffPrintError(FF_MODULE_GET_DISPLAY_NAME(Packages), 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "No packages from known package managers found");
         return false;
     }
 
@@ -29,7 +29,7 @@ bool ffPrintPackages(FFPackagesOptions* options) {
     uint32_t scoopAll = counts.scoopUser + counts.scoopGlobal;
 
     if (options->moduleArgs.outputFormat.length == 0) {
-        ffPrintLogoAndKey(FF_PACKAGES_MODULE_NAME, 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT);
+        ffPrintLogoAndKey(FF_MODULE_GET_DISPLAY_NAME(Packages), 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT);
 
         FF_STRBUF_AUTO_DESTROY output = ffStrbufCreate();
 
@@ -63,6 +63,7 @@ bool ffPrintPackages(FFPackagesOptions* options) {
         }
         FF_PRINT_PACKAGE(cards)
         FF_PRINT_PACKAGE(choco)
+        FF_PRINT_PACKAGE(crux)
         FF_PRINT_PACKAGE(dpkg)
         FF_PRINT_PACKAGE(emerge)
         FF_PRINT_PACKAGE(eopkg)
@@ -89,6 +90,7 @@ bool ffPrintPackages(FFPackagesOptions* options) {
         } else {
             FF_PRINT_PACKAGE_NAME(hpkgSystem, "hpkg")
         }
+        FF_PRINT_PACKAGE_NAME(installrelease, "install-release")
         FF_PRINT_PACKAGE(kiss)
         FF_PRINT_PACKAGE(linglong)
         FF_PRINT_PACKAGE(lpkg)
@@ -119,7 +121,9 @@ bool ffPrintPackages(FFPackagesOptions* options) {
         FF_PRINT_PACKAGE(pkg)
         FF_PRINT_PACKAGE(pkgsrc)
         FF_PRINT_PACKAGE(pkgtool)
+        FF_PRINT_PACKAGE(porg)
         FF_PRINT_PACKAGE(rpm)
+        FF_PRINT_PACKAGE(rum)
         if (options->combined) {
             FF_PRINT_PACKAGE_ALL(scoop);
         } else if (counts.scoopGlobal > 0) {
@@ -139,7 +143,7 @@ bool ffPrintPackages(FFPackagesOptions* options) {
         output.chars[output.length - 1] = '\n';
         ffStrbufWriteTo(&output, stdout);
     } else {
-        FF_PRINT_FORMAT_CHECKED(FF_PACKAGES_MODULE_NAME,
+        FF_PRINT_FORMAT_CHECKED(FF_MODULE_GET_DISPLAY_NAME(Packages),
             0,
             &options->moduleArgs,
             FF_PRINT_TYPE_DEFAULT,
@@ -152,6 +156,7 @@ bool ffPrintPackages(FFPackagesOptions* options) {
                 FF_ARG(counts.brewCask, "brew-cask"),
                 FF_ARG(counts.cards, "cards"),
                 FF_ARG(counts.choco, "choco"),
+                FF_ARG(counts.crux, "crux"),
                 FF_ARG(counts.dpkg, "dpkg"),
                 FF_ARG(counts.emerge, "emerge"),
                 FF_ARG(counts.eopkg, "eopkg"),
@@ -162,6 +167,7 @@ bool ffPrintPackages(FFPackagesOptions* options) {
                 FF_ARG(counts.guixUser, "guix-user"),
                 FF_ARG(counts.hpkgSystem, "hpkg-system"),
                 FF_ARG(counts.hpkgUser, "hpkg-user"),
+                FF_ARG(counts.installrelease, "install-release"),
                 FF_ARG(counts.kiss, "kiss"),
                 FF_ARG(counts.linglong, "linglong"),
                 FF_ARG(counts.lpkg, "lpkg"),
@@ -181,7 +187,9 @@ bool ffPrintPackages(FFPackagesOptions* options) {
                 FF_ARG(counts.pkg, "pkg"),
                 FF_ARG(counts.pkgsrc, "pkgsrc"),
                 FF_ARG(counts.pkgtool, "pkgtool"),
+                FF_ARG(counts.porg, "porg"),
                 FF_ARG(counts.rpm, "rpm"),
+                FF_ARG(counts.rum, "rum"),
                 FF_ARG(counts.scoopGlobal, "scoop-global"),
                 FF_ARG(counts.scoopUser, "scoop-user"),
                 FF_ARG(counts.snap, "snap"),
@@ -215,7 +223,7 @@ void ffParsePackagesJsonObject(FFPackagesOptions* options, yyjson_val* module) {
 #if !FF_PACKAGES_REMOVE_DISABLED
         if (unsafe_yyjson_equals_str(key, "disabled")) {
             if (!yyjson_is_null(val) && !yyjson_is_arr(val)) {
-                ffPrintError(FF_PACKAGES_MODULE_NAME, 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "Invalid JSON value for %s", unsafe_yyjson_get_str(key));
+                ffPrintError(FF_MODULE_GET_DISPLAY_NAME(Packages), 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "Invalid JSON value for %s", unsafe_yyjson_get_str(key));
                 continue;
             }
 
@@ -226,7 +234,7 @@ void ffParsePackagesJsonObject(FFPackagesOptions* options, yyjson_val* module) {
                 size_t flagIdx, flagMax;
                 yyjson_arr_foreach (val, flagIdx, flagMax, flagObj) {
                     if (!yyjson_is_str(flagObj)) {
-                        ffPrintError(FF_PACKAGES_MODULE_NAME, 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "Invalid JSON value for %s", unsafe_yyjson_get_str(key));
+                        ffPrintError(FF_MODULE_GET_DISPLAY_NAME(Packages), 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "Invalid JSON value for %s", unsafe_yyjson_get_str(key));
                         continue;
                     }
                     const char* flag = unsafe_yyjson_get_str(flagObj);
@@ -253,6 +261,7 @@ void ffParsePackagesJsonObject(FFPackagesOptions* options, yyjson_val* module) {
                                 ;
                             FF_TEST_PACKAGE_NAME(CARDS)
                             FF_TEST_PACKAGE_NAME(CHOCO)
+                            FF_TEST_PACKAGE_NAME(CRUX)
                             break;
                         case 'D':
                             if (false)
@@ -279,6 +288,11 @@ void ffParsePackagesJsonObject(FFPackagesOptions* options, yyjson_val* module) {
                             if (false)
                                 ;
                             FF_TEST_PACKAGE_NAME(HPKG)
+                            break;
+                        case 'I':
+                            if (false)
+                                ;
+                            FF_TEST_PACKAGE_NAME(INSTALLRELEASE)
                             break;
                         case 'K':
                             if (false)
@@ -319,11 +333,13 @@ void ffParsePackagesJsonObject(FFPackagesOptions* options, yyjson_val* module) {
                             FF_TEST_PACKAGE_NAME(PKG)
                             FF_TEST_PACKAGE_NAME(PKGSRC)
                             FF_TEST_PACKAGE_NAME(PKGTOOL)
+                            FF_TEST_PACKAGE_NAME(PORG)
                             break;
                         case 'R':
                             if (false)
                                 ;
                             FF_TEST_PACKAGE_NAME(RPM)
+                            FF_TEST_PACKAGE_NAME(RUM)
                             break;
                         case 'S':
                             if (false)
@@ -356,10 +372,11 @@ void ffParsePackagesJsonObject(FFPackagesOptions* options, yyjson_val* module) {
             continue;
         }
 
-        ffPrintError(FF_PACKAGES_MODULE_NAME, 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "Unknown JSON key %s", unsafe_yyjson_get_str(key));
+        ffPrintError(FF_MODULE_GET_DISPLAY_NAME(Packages), 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "Unknown JSON key %s", unsafe_yyjson_get_str(key));
     }
 }
 
+[[gnu::cold]]
 void ffGeneratePackagesJsonConfig(FFPackagesOptions* options, yyjson_mut_doc* doc, yyjson_mut_val* module) {
     ffJsonConfigGenerateModuleArgsConfig(doc, module, &options->moduleArgs);
 
@@ -380,6 +397,7 @@ void ffGeneratePackagesJsonConfig(FFPackagesOptions* options, yyjson_mut_doc* do
     FF_TEST_PACKAGE_NAME(BREW)
     FF_TEST_PACKAGE_NAME(CARDS)
     FF_TEST_PACKAGE_NAME(CHOCO)
+    FF_TEST_PACKAGE_NAME(CRUX)
     FF_TEST_PACKAGE_NAME(DPKG)
     FF_TEST_PACKAGE_NAME(EMERGE)
     FF_TEST_PACKAGE_NAME(EOPKG)
@@ -402,7 +420,9 @@ void ffGeneratePackagesJsonConfig(FFPackagesOptions* options, yyjson_mut_doc* do
     FF_TEST_PACKAGE_NAME(PKG)
     FF_TEST_PACKAGE_NAME(PKGSRC)
     FF_TEST_PACKAGE_NAME(PKGTOOL)
+    FF_TEST_PACKAGE_NAME(PORG)
     FF_TEST_PACKAGE_NAME(RPM)
+    FF_TEST_PACKAGE_NAME(RUM)
     FF_TEST_PACKAGE_NAME(SCOOP)
     FF_TEST_PACKAGE_NAME(SNAP)
     FF_TEST_PACKAGE_NAME(SOAR)
@@ -440,6 +460,7 @@ bool ffGeneratePackagesJsonResult(FFPackagesOptions* options, yyjson_mut_doc* do
     FF_APPEND_PACKAGE_COUNT(brewCask)
     FF_APPEND_PACKAGE_COUNT(cards)
     FF_APPEND_PACKAGE_COUNT(choco)
+    FF_APPEND_PACKAGE_COUNT(crux)
     FF_APPEND_PACKAGE_COUNT(dpkg)
     FF_APPEND_PACKAGE_COUNT(emerge)
     FF_APPEND_PACKAGE_COUNT(eopkg)
@@ -450,6 +471,7 @@ bool ffGeneratePackagesJsonResult(FFPackagesOptions* options, yyjson_mut_doc* do
     FF_APPEND_PACKAGE_COUNT(guixUser)
     FF_APPEND_PACKAGE_COUNT(hpkgSystem)
     FF_APPEND_PACKAGE_COUNT(hpkgUser)
+    FF_APPEND_PACKAGE_COUNT(installrelease)
     FF_APPEND_PACKAGE_COUNT(kiss)
     FF_APPEND_PACKAGE_COUNT(linglong)
     FF_APPEND_PACKAGE_COUNT(lpkg)
@@ -468,7 +490,9 @@ bool ffGeneratePackagesJsonResult(FFPackagesOptions* options, yyjson_mut_doc* do
     FF_APPEND_PACKAGE_COUNT(pkg)
     FF_APPEND_PACKAGE_COUNT(pkgsrc)
     FF_APPEND_PACKAGE_COUNT(pkgtool)
+    FF_APPEND_PACKAGE_COUNT(porg)
     FF_APPEND_PACKAGE_COUNT(rpm)
+    FF_APPEND_PACKAGE_COUNT(rum)
     FF_APPEND_PACKAGE_COUNT(scoopGlobal)
     FF_APPEND_PACKAGE_COUNT(scoopUser)
     FF_APPEND_PACKAGE_COUNT(snap)
@@ -497,8 +521,31 @@ void ffDestroyPackagesOptions(FFPackagesOptions* options) {
 }
 
 FFModuleBaseInfo ffPackagesModuleInfo = {
-    .name = FF_PACKAGES_MODULE_NAME,
+    .name = "Packages",
     .description = "List installed package managers and count of installed packages",
+    .displayName = {
+        .en = "Packages",
+        .ar = "الحزم",
+        .cs = "Balíčky",
+        .de = "Pakete",
+        .es = "Paquetes",
+        .fi = "Ohjelmistopaketit",
+        .fr = "Paquets",
+        .gl = "Paquetes",
+        .he = "חבילות",
+        .id = "Paket",
+        .it = "Pacchetti",
+        .ja = "パッケージ",
+        .ko = "패키지",
+        .pl = "Pakiety",
+        .pt = "Pacotes",
+        .ru = "Пакеты",
+        .tr = "Paketler",
+        .uk = "Пакети",
+        .vi = "Gói phần mềm",
+        .zh_CN = "软件包",
+        .zh_TW = "軟體包",
+    },
     .initOptions = (void*) ffInitPackagesOptions,
     .destroyOptions = (void*) ffDestroyPackagesOptions,
     .parseJsonObject = (void*) ffParsePackagesJsonObject,
@@ -514,6 +561,7 @@ FFModuleBaseInfo ffPackagesModuleInfo = {
         { "Number of brew-cask packages", "brew-cask" },
         { "Number of cards packages", "cards" },
         { "Number of choco packages", "choco" },
+        { "Number of crux packages", "crux" },
         { "Number of dpkg packages", "dpkg" },
         { "Number of emerge packages", "emerge" },
         { "Number of eopkg packages", "eopkg" },
@@ -524,6 +572,7 @@ FFModuleBaseInfo ffPackagesModuleInfo = {
         { "Number of guix-user packages", "guix-user" },
         { "Number of hpkg-system packages", "hpkg-system" },
         { "Number of hpkg-user packages", "hpkg-user" },
+        { "Number of install-release packages", "install-release" },
         { "Number of kiss packages", "kiss" },
         { "Number of linglong packages", "linglong" },
         { "Number of lpkg packages", "lpkg" },
@@ -543,7 +592,9 @@ FFModuleBaseInfo ffPackagesModuleInfo = {
         { "Number of pkg packages", "pkg" },
         { "Number of pkgsrc packages", "pkgsrc" },
         { "Number of pkgtool packages", "pkgtool" },
+        { "Number of porg packages", "porg" },
         { "Number of rpm packages", "rpm" },
+        { "Number of rum overlay packages", "rum" },
         { "Number of scoop-global packages", "scoop-global" },
         { "Number of scoop-user packages", "scoop-user" },
         { "Number of snap packages", "snap" },
@@ -558,5 +609,6 @@ FFModuleBaseInfo ffPackagesModuleInfo = {
         { "Total number of all hpkg packages", "hpkg-all" },
         { "Total number of all nix packages", "nix-all" },
         { "Number of all packages", "all" },
-    }))
+    })),
+    .defaultOrder = 14,
 };

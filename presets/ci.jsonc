@@ -94,24 +94,25 @@
         "opengl",
         "opencl",
         "users",
-        // "bluetooth", // doesn't work on macOS because it requires bluetooth permissions
-        // "bluetoothradio",
+        "bluetooth",
+        "bluetoothradio",
         "sound",
         "camera",
         "gamepad",
         "mouse",
         "keyboard",
-        {
-            "type": "weather",
-            "timeout": 1000
-        },
+        "tpm",
         "netio",
         "diskio",
         {
             "type": "physicaldisk",
             "temp": true
         },
-        "tpm",
+        {
+            "type": "weather",
+            "timeout": 1000
+        },
+        "top",
         "version",
         "logo",
         "break",

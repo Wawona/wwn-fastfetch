@@ -2,11 +2,12 @@
 
 extern "C" {
 #include "opengl.h"
+#include "common/debug.h"
 #include "common/io.h"
 #if FF_HAVE_EGL
 const char* ffOpenGLDetectByEGL(FFOpenGLResult* result);
 #endif
-void ffOpenGLHandleResult(FFOpenGLResult* result, __typeof__(&glGetString) ffglGetString);
+void ffOpenGLHandleResult(FFOpenGLResult* result, typeof(&glGetString) ffglGetString);
 }
 
 static const char* oglDetectOpenGL(FFOpenGLResult* result) {
@@ -16,11 +17,12 @@ static const char* oglDetectOpenGL(FFOpenGLResult* result) {
     BGLView glView(BRect(), "ff_ogl_view", B_FOLLOW_NONE, B_WILL_DRAW, BGL_RGB);
     auto ffglGetString = (decltype(&glGetString)) glView.GetGLProcAddress("glGetString");
     if (!ffglGetString) {
+        FF_DEBUG("glView.GetGLProcAddress(glGetString) returned null");
         return "glView.GetGLProcAddress() failed";
     }
     ffOpenGLHandleResult(result, ffglGetString);
     ffStrbufSetStatic(&result->library, "OpenGLKit");
-    return NULL;
+    return nullptr;
 }
 
 const char* ffDetectOpenGL(FFOpenGLOptions* options, FFOpenGLResult* result) {
@@ -33,6 +35,7 @@ const char* ffDetectOpenGL(FFOpenGLOptions* options, FFOpenGLResult* result) {
         return "fastfetch was compiled without egl support";
 #endif
     } else {
+        FF_DEBUG("Unsupported OpenGL library requested: %d", (int) options->library);
         return "Unsupported OpenGL library";
     }
 }

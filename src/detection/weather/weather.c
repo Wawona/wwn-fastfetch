@@ -29,7 +29,7 @@ void ffPrepareWeather(FFWeatherOptions* options) {
         default:
             break;
     }
-    status = ffNetworkingSendHttpRequest(&state, "wttr.in", path.chars, "User-Agent: curl/0.0.0\r\n");
+    status = ffNetworkingSendHttpRequest(&state, "wttr.in", 80, path.chars, "User-Agent: curl/0.0.0\r\n");
 }
 
 const char* ffDetectWeather(FFWeatherOptions* options, FFstrbuf* result) {
@@ -37,17 +37,20 @@ const char* ffDetectWeather(FFWeatherOptions* options, FFstrbuf* result) {
         ffPrepareWeather(options);
     }
 
-    if (status != NULL) {
-        return status;
+    if (status != nullptr) {
+        const char* error = status;
+        ffNetworkingResetState(&state);
+        status = FF_UNITIALIZED;
+        return error;
     }
 
     ffStrbufEnsureFree(result, 4095);
     const char* error = ffNetworkingRecvHttpResponse(&state, result);
 
-    state = (FFNetworkingState) {};
+    ffNetworkingResetState(&state);
     status = FF_UNITIALIZED;
 
-    if (error == NULL) {
+    if (error == nullptr) {
         ffStrbufSubstrAfterFirstS(result, "\r\n\r\n");
         ffStrbufTrimRightSpace(result);
     } else {
@@ -58,5 +61,5 @@ const char* ffDetectWeather(FFWeatherOptions* options, FFstrbuf* result) {
         return "Empty server response received";
     }
 
-    return NULL;
+    return nullptr;
 }

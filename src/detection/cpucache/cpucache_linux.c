@@ -1,12 +1,17 @@
 #include "cpucache.h"
+#include "common/debug.h"
 #include "common/io.h"
 #include "common/strutil.h"
+
+#include <errno.h>
+#include <string.h>
 
 static const char* parseCpuCacheIndex(FFstrbuf* path, FFCPUCacheResult* result, FFstrbuf* buffer, FFstrbuf* added) {
     uint32_t baseLen = path->length;
     ffStrbufAppendS(path, "/level");
     if (!ffReadFileBuffer(path->chars, buffer)) {
-        return "ffReadFileBuffer(\"/sys/devices/system/cpu/cpuX/cache/indexX/level\") == NULL";
+        FF_DEBUG("Failed to read \"%s\"", path->chars);
+        return "ffReadFileBuffer(\"/sys/devices/system/cpu/cpuX/cache/indexX/level\") == nullptr";
     }
 
     uint32_t level = (uint32_t) ffStrbufToUInt(buffer, 0);
@@ -17,7 +22,8 @@ static const char* parseCpuCacheIndex(FFstrbuf* path, FFCPUCacheResult* result, 
     ffStrbufSubstrBefore(path, baseLen);
     ffStrbufAppendS(path, "/size");
     if (!ffReadFileBuffer(path->chars, buffer)) {
-        return "ffReadFileBuffer(\"/sys/devices/system/cpu/cpuX/cache/indexX/size\") == NULL";
+        FF_DEBUG("Failed to read \"%s\"", path->chars);
+        return "ffReadFileBuffer(\"/sys/devices/system/cpu/cpuX/cache/indexX/size\") == nullptr";
     }
 
     uint32_t sizeKb = (uint32_t) ffStrbufToUInt(buffer, 0);
@@ -28,7 +34,8 @@ static const char* parseCpuCacheIndex(FFstrbuf* path, FFCPUCacheResult* result, 
     ffStrbufSubstrBefore(path, baseLen);
     ffStrbufAppendS(path, "/type");
     if (!ffReadFileBuffer(path->chars, buffer)) {
-        return "ffReadFileBuffer(\"/sys/devices/system/cpu/cpuX/cache/indexX/type\") == NULL";
+        FF_DEBUG("Failed to read \"%s\"", path->chars);
+        return "ffReadFileBuffer(\"/sys/devices/system/cpu/cpuX/cache/indexX/type\") == nullptr";
     }
     ffStrbufTrimRightSpace(buffer);
 
@@ -47,6 +54,7 @@ static const char* parseCpuCacheIndex(FFstrbuf* path, FFCPUCacheResult* result, 
             cacheType = FF_CPU_CACHE_TYPE_TRACE;
             break;
         default:
+            FF_DEBUG("Unknown cache type \"%c\"", buffer->chars[0]);
             return "unknown cache type";
     }
 
@@ -62,7 +70,8 @@ static const char* parseCpuCacheIndex(FFstrbuf* path, FFCPUCacheResult* result, 
     ffStrbufClear(buffer);
     ffStrbufAppendC(buffer, '[');
     if (!ffAppendFileBuffer(path->chars, buffer)) {
-        return "ffAppendFileBuffer(\"/sys/devices/system/cpu/cpuX/cache/indexX/shared_cpu_list\") == NULL";
+        FF_DEBUG("Failed to read \"%s\"", path->chars);
+        return "ffAppendFileBuffer(\"/sys/devices/system/cpu/cpuX/cache/indexX/shared_cpu_list\") == nullptr";
     }
     ffStrbufTrimRightSpace(buffer);
 
@@ -70,11 +79,11 @@ static const char* parseCpuCacheIndex(FFstrbuf* path, FFCPUCacheResult* result, 
     ffStrbufAppendF(buffer, "_%u_%u_%u_%u]", level, sizeKb, lineSize, cacheType);
 
     if (ffStrbufContain(added, buffer)) {
-        return NULL;
+        return nullptr;
     }
     ffStrbufAppend(added, buffer);
     ffCPUCacheAddItem(result, level, sizeKb * 1024, lineSize, cacheType);
-    return NULL;
+    return nullptr;
 }
 
 static const char* parseCpuCache(FFstrbuf* path, FFCPUCacheResult* result, FFstrbuf* buffer, FFstrbuf* added) {
@@ -82,11 +91,12 @@ static const char* parseCpuCache(FFstrbuf* path, FFCPUCacheResult* result, FFstr
     uint32_t baseLen = path->length;
     FF_AUTO_CLOSE_DIR DIR* pathCacheDir = opendir(path->chars);
     if (!pathCacheDir) {
-        return "opendir(\"/sys/devices/system/cpu/cpuX/cache/\") == NULL";
+        FF_DEBUG("opendir(\"%s\") failed: %s", path->chars, strerror(errno));
+        return "opendir(\"/sys/devices/system/cpu/cpuX/cache/\") == nullptr";
     }
 
     struct dirent* pathCacheEntry;
-    while ((pathCacheEntry = readdir(pathCacheDir)) != NULL) {
+    while ((pathCacheEntry = readdir(pathCacheDir)) != nullptr) {
         if (!ffStrStartsWith(pathCacheEntry->d_name, "index") || !ffCharIsDigit(pathCacheEntry->d_name[strlen("index")])) {
             continue;
         }
@@ -99,7 +109,7 @@ static const char* parseCpuCache(FFstrbuf* path, FFCPUCacheResult* result, FFstr
         ffStrbufSubstrBefore(path, baseLen);
     }
 
-    return NULL;
+    return nullptr;
 }
 
 const char* ffDetectCPUCache(FFCPUCacheResult* result) {
@@ -108,14 +118,15 @@ const char* ffDetectCPUCache(FFCPUCacheResult* result) {
     uint32_t baseLen = path.length;
     FF_AUTO_CLOSE_DIR DIR* pathCpuDir = opendir(path.chars);
     if (!pathCpuDir) {
-        return "opendir(\"/sys/devices/system/cpu/\") == NULL";
+        FF_DEBUG("opendir(\"%s\") failed: %s", path.chars, strerror(errno));
+        return "opendir(\"/sys/devices/system/cpu/\") == nullptr";
     }
 
     FF_STRBUF_AUTO_DESTROY buffer = ffStrbufCreate();
     FF_STRBUF_AUTO_DESTROY added = ffStrbufCreate();
 
     struct dirent* pathCpuEntry;
-    while ((pathCpuEntry = readdir(pathCpuDir)) != NULL) {
+    while ((pathCpuEntry = readdir(pathCpuDir)) != nullptr) {
         if (!ffStrStartsWith(pathCpuEntry->d_name, "cpu") ||
             !ffCharIsDigit(pathCpuEntry->d_name[strlen("cpu")])) {
             continue;
@@ -128,5 +139,5 @@ const char* ffDetectCPUCache(FFCPUCacheResult* result) {
         }
         ffStrbufSubstrBefore(&path, baseLen);
     }
-    return NULL;
+    return nullptr;
 }

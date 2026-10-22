@@ -50,19 +50,20 @@ bool ffPrintOS(FFOSOptions* options) {
     const FFOSResult* os = ffDetectOS();
 
     if (os->name.length == 0 && os->prettyName.length == 0 && os->id.length == 0) {
-        ffPrintError(FF_OS_MODULE_NAME, 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "Could not detect OS");
+        ffPrintError(FF_MODULE_GET_DISPLAY_NAME(OS), 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "Could not detect OS");
         return false;
     }
 
     FF_STRBUF_AUTO_DESTROY key = ffStrbufCreate();
 
     if (options->moduleArgs.key.length == 0) {
-        ffStrbufSetStatic(&key, FF_OS_MODULE_NAME);
+        ffStrbufSetStatic(&key, FF_MODULE_GET_DISPLAY_NAME(OS));
     } else {
         FF_PARSE_FORMAT_STRING_CHECKED(&key, &options->moduleArgs.key, ((FFformatarg[]) {
                                                                            FF_ARG(instance.state.platform.sysinfo.name, "sysname"),
                                                                            FF_ARG(os->name, "name"),
                                                                            FF_ARG(options->moduleArgs.keyIcon, "icon"),
+                                                                           FF_ARG(FF_MODULE_GET_DISPLAY_NAME(OS), "module-name"),
                                                                        }));
     }
 
@@ -112,15 +113,16 @@ void ffParseOSJsonObject(FFOSOptions* options, yyjson_val* module) {
             continue;
         }
 
-        ffPrintError(FF_OS_MODULE_NAME, 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "Unknown JSON key %s", unsafe_yyjson_get_str(key));
+        ffPrintError(FF_MODULE_GET_DISPLAY_NAME(OS), 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "Unknown JSON key %s", unsafe_yyjson_get_str(key));
     }
 }
 
+[[gnu::cold]]
 void ffGenerateOSJsonConfig(FFOSOptions* options, yyjson_mut_doc* doc, yyjson_mut_val* module) {
     ffJsonConfigGenerateModuleArgsConfig(doc, module, &options->moduleArgs);
 }
 
-bool ffGenerateOSJsonResult(FF_A_UNUSED FFOSOptions* options, yyjson_mut_doc* doc, yyjson_mut_val* module) {
+bool ffGenerateOSJsonResult([[maybe_unused]] FFOSOptions* options, yyjson_mut_doc* doc, yyjson_mut_val* module) {
     const FFOSResult* os = ffDetectOS();
 
     if (os->name.length == 0 && os->prettyName.length == 0 && os->id.length == 0) {
@@ -172,8 +174,31 @@ void ffDestroyOSOptions(FFOSOptions* options) {
 }
 
 FFModuleBaseInfo ffOSModuleInfo = {
-    .name = FF_OS_MODULE_NAME,
+    .name = "OS",
     .description = "Print the OS or Linux distribution name and version",
+    .displayName = {
+        .en = "OS",
+        .ar = "نظام التشغيل",
+        .cs = "OS",
+        .de = "Betriebssystem",
+        .es = "Sistema operativo",
+        .fi = "Käyttöjärjestelmä",
+        .fr = "Système d'exploitation",
+        .gl = "Sistema operativo",
+        .he = "מערכת הפעלה",
+        .id = "OS",
+        .it = "Sistema operativo",
+        .ja = "オペレーティングシステム",
+        .ko = "운영 체제",
+        .pl = "System operacyjny",
+        .pt = "Sistema operacional",
+        .ru = "Операционная система",
+        .tr = "İşletim Sistemi",
+        .uk = "ОС",
+        .vi = "Hệ điều hành",
+        .zh_CN = "操作系统",
+        .zh_TW = "操作系統",
+    },
     .initOptions = (void*) ffInitOSOptions,
     .destroyOptions = (void*) ffDestroyOSOptions,
     .parseJsonObject = (void*) ffParseOSJsonObject,
@@ -181,8 +206,8 @@ FFModuleBaseInfo ffOSModuleInfo = {
     .generateJsonResult = (void*) ffGenerateOSJsonResult,
     .generateJsonConfig = (void*) ffGenerateOSJsonConfig,
     .formatArgs = FF_FORMAT_ARG_LIST(((FFModuleFormatArg[]) {
-        { "Name of the kernel", "sysname" },
-        { "Name of the OS", "name" },
+        { "Name of the kernel *", "sysname" },
+        { "Name of the OS *", "name" },
         { "Pretty name of the OS, if available", "pretty-name" },
         { "ID of the OS", "id" },
         { "ID like of the OS", "id-like" },
@@ -193,5 +218,7 @@ FFModuleBaseInfo ffOSModuleInfo = {
         { "Version codename of the OS", "codename" },
         { "Build ID of the OS", "build-id" },
         { "Architecture of the OS", "arch" },
-    }))
+        { "Release of the kernel", "kernel-release" },
+    })),
+    .defaultOrder = 3,
 };

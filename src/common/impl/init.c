@@ -5,7 +5,6 @@
 #include "common/textModifier.h"
 #include "common/strutil.h"
 #include "detection/displayserver/displayserver.h"
-#include "detection/terminaltheme/terminaltheme.h"
 #include "logo/logo.h"
 
 #include <stdlib.h>
@@ -27,21 +26,10 @@ static void initState(FFstate* state) {
     state->logoWidth = 0;
     state->logoHeight = 0;
     state->keysHeight = 0;
-    state->terminalLightTheme = false;
     state->titleFqdn = false;
 
     ffPlatformInit(&state->platform);
     state->dynamicInterval = 0;
-
-    #if !FF_MODULE_DISABLE_TERMINALTHEME
-    {
-        // don't enable bright color if the terminal is in light mode
-        FFTerminalThemeResult result;
-        if (ffDetectTerminalTheme(&result, true /* forceEnv for performance */) && !result.bg.dark) {
-            state->terminalLightTheme = true;
-        }
-    }
-    #endif
 }
 
 static void defaultConfig(void) {
@@ -51,7 +39,7 @@ static void defaultConfig(void) {
 }
 
 #ifdef _WIN32
-static volatile UINT oldCp = CP_UTF8;
+static UINT oldCp = CP_UTF8;
 void resetConsoleCP(void) {
     if (oldCp != CP_UTF8) {
         SetConsoleOutputCP(oldCp);
@@ -81,6 +69,10 @@ void ffInitInstance(void) {
 
     defaultConfig();
     initState(&instance.state);
+
+#ifdef _WIN32
+    instance.state.platform.initCP = oldCp;
+#endif
 }
 
 static volatile bool ffDisableLinewrap = false;
@@ -105,12 +97,12 @@ static void resetConsole(void) {
 }
 
 #ifdef _WIN32
-BOOL WINAPI consoleHandler(FF_A_UNUSED DWORD signal) {
+BOOL WINAPI consoleHandler([[maybe_unused]] DWORD signal) {
     resetConsole();
     exit(0);
 }
 #else
-static void exitSignalHandler(FF_A_UNUSED int signal) {
+static void exitSignalHandler([[maybe_unused]] int signal) {
     resetConsole();
     exit(0);
 }
@@ -123,26 +115,26 @@ void ffStart(void) {
 #ifdef _WIN32
     SetErrorMode(SEM_FAILCRITICALERRORS);
     if (instance.config.display.noBuffer) {
-        setvbuf(stdout, NULL, _IONBF, 0);
+        setvbuf(stdout, nullptr, _IONBF, 0);
     } else {
-        setvbuf(stdout, NULL, _IOFBF, 4096);
+        setvbuf(stdout, nullptr, _IOFBF, 4096);
     }
     SetConsoleCtrlHandler(consoleHandler, TRUE);
 #else
     if (instance.config.display.noBuffer) {
-        setvbuf(stdout, NULL, _IONBF, 0);
+        setvbuf(stdout, nullptr, _IONBF, 0);
     }
     struct sigaction action;
     sigemptyset(&action.sa_mask);
     action.sa_flags = 0;
     action.sa_handler = exitSignalHandler;
-    sigaction(SIGINT, &action, NULL);
-    sigaction(SIGTERM, &action, NULL);
-    sigaction(SIGQUIT, &action, NULL);
+    sigaction(SIGINT, &action, nullptr);
+    sigaction(SIGTERM, &action, nullptr);
+    sigaction(SIGQUIT, &action, nullptr);
     sigset_t newmask;
     sigemptyset(&newmask);
     sigaddset(&newmask, SIGCHLD);
-    sigprocmask(SIG_BLOCK, &newmask, NULL);
+    sigprocmask(SIG_BLOCK, &newmask, nullptr);
 #endif
 
     // reset everything to default before we start printing
@@ -185,9 +177,6 @@ void ffDestroyInstance(void) {
 
 #if FF_HAVE_LUA
     #include <lua.h>
-#endif
-#if FF_HAVE_QUICKJS
-    #include <quickjs.h>
 #endif
 
 // Must be in a file compiled with the libfastfetch target, because the FF_HAVE* macros are not defined for the executable targets
@@ -256,20 +245,17 @@ void ffListFeatures(void) {
 #if FF_HAVE_FREETYPE
         "freetype\n"
 #endif
-#if FF_HAVE_PULSE
-        "libpulse\n"
-#endif
-#if FF_HAVE_DDCUTIL
-        "libddcutil\n"
-#endif
 #if FF_HAVE_ELF || __sun || (__FreeBSD__ && !__DragonFly__) || __OpenBSD__ || __NetBSD__
         "libelf\n"
 #endif
 #if FF_HAVE_LIBZFS
         "libzfs\n"
 #endif
-#if FF_HAVE_VA
-        "va\n"
+#if FF_HAVE_VADRM
+        "va-drm\n"
+#endif
+#if FF_HAVE_VAX11
+        "va-x11\n"
 #endif
 #if FF_HAVE_VDPAU
         "vdpau\n"
@@ -286,6 +272,9 @@ void ffListFeatures(void) {
 #if FF_ENABLE_WCWIDTH
         "Embedded wcwidth\n"
 #endif
+#if FF_HAVE_SIXEL
+        "Embedded sixel\n"
+#endif
 #if FF_HAVE_WINRT
         "WinRT headers\n"
 #endif
@@ -297,9 +286,6 @@ void ffListFeatures(void) {
 #endif
 #if FF_HAVE_LUA
         LUA_VERSION "\n"
-#endif
-#if FF_HAVE_QUICKJS
-        "QuickJS " FF_STR(QJS_VERSION_MAJOR) "." FF_STR(QJS_VERSION_MINOR) "." FF_STR(QJS_VERSION_PATCH) QJS_VERSION_SUFFIX "\n"
 #endif
         "",
         stdout);

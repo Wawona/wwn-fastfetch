@@ -1,10 +1,13 @@
 #include "detection/cpuusage/cpuusage.h"
+#include "common/debug.h"
 #include "common/mallocHelper.h"
 
 #include <sys/types.h>
 #include <sys/sysctl.h>
 #include <sys/resource.h>
 #include <stdlib.h>
+#include <errno.h>
+#include <string.h>
 
 #if __OpenBSD__ || __NetBSD__
     #include <sys/sched.h>
@@ -18,12 +21,14 @@ const char* ffGetCpuUsageInfo(FFlist* cpuTimes) {
     #else
     int ctls[] = { CTL_KERN, KERN_CP_TIME };
     #endif
-    if (sysctl(ctls, 2, NULL, &neededLength, NULL, 0) != 0) {
-        return "sysctl({CTL_KERN, KERN_CPTIME}, 2, NULL) failed";
+    if (sysctl(ctls, 2, nullptr, &neededLength, nullptr, 0) != 0) {
+        FF_DEBUG("sysctl({CTL_KERN, KERN_CPTIME}, 2, nullptr) failed: %s", strerror(errno));
+        return "sysctl({CTL_KERN, KERN_CPTIME}, 2, nullptr) failed";
     }
 #else
-    if (sysctlbyname("kern.cp_times", NULL, &neededLength, NULL, 0) != 0) {
-        return "sysctlbyname(kern.cp_times, NULL) failed";
+    if (sysctlbyname("kern.cp_times", nullptr, &neededLength, nullptr, 0) != 0) {
+        FF_DEBUG("sysctlbyname(kern.cp_times, nullptr) failed: %s", strerror(errno));
+        return "sysctlbyname(kern.cp_times, nullptr) failed";
     }
 #endif
 
@@ -33,11 +38,13 @@ const char* ffGetCpuUsageInfo(FFlist* cpuTimes) {
     FF_AUTO_FREE uint64_t (*cpTimes)[CPUSTATES] = malloc(neededLength);
 
 #if __OpenBSD__ || __NetBSD__
-    if (sysctl(ctls, 2, cpTimes, &neededLength, NULL, 0) != 0) {
-        return "sysctl({CTL_KERN, KERN_CPTIME}, 2, NULL) failed";
+    if (sysctl(ctls, 2, cpTimes, &neededLength, nullptr, 0) != 0) {
+        FF_DEBUG("sysctl({CTL_KERN, KERN_CPTIME}, 2, cpTimes) failed: %s", strerror(errno));
+        return "sysctl({CTL_KERN, KERN_CPTIME}, 2, nullptr) failed";
     }
 #else
-    if (sysctlbyname("kern.cp_times", cpTimes, &neededLength, NULL, 0) != 0) {
+    if (sysctlbyname("kern.cp_times", cpTimes, &neededLength, nullptr, 0) != 0) {
+        FF_DEBUG("sysctlbyname(kern.cp_times, cpTimes) failed: %s", strerror(errno));
         return "sysctlbyname(kern.cp_times, cpTime) failed";
     }
 #endif
@@ -54,5 +61,5 @@ const char* ffGetCpuUsageInfo(FFlist* cpuTimes) {
         };
     }
 
-    return NULL;
+    return nullptr;
 }

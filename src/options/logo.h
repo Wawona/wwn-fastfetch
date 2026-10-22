@@ -5,7 +5,7 @@
 #define FASTFETCH_LOGO_MAX_NAMES 9
 #define FASTFETCH_LOGO_MAX_COLORS 9 // two digits would make parsing much more complicated (index 1 - 9)
 
-typedef enum FF_A_PACKED FFLogoType {
+typedef enum FFLogoType: uint8_t {
     FF_LOGO_TYPE_AUTO,               // if something is given, first try builtin, then file. Otherwise detect logo
     FF_LOGO_TYPE_BUILTIN,            // builtin ascii art
     FF_LOGO_TYPE_SMALL,              // builtin ascii art, small version
@@ -24,11 +24,24 @@ typedef enum FF_A_PACKED FFLogoType {
     FF_LOGO_TYPE_NONE,               // `--logo none`, but still applies colors to the system information output (unless `--pipe` is set)
 } FFLogoType;
 
-typedef enum FF_A_PACKED FFLogoPosition {
+typedef enum FFLogoPosition: uint8_t {
     FF_LOGO_POSITION_LEFT,
     FF_LOGO_POSITION_TOP,
     FF_LOGO_POSITION_RIGHT,
+    FF_LOGO_POSITION_AUTO,
 } FFLogoPosition;
+
+typedef enum FFLogoCacheStrategy: uint8_t {
+    FF_LOGO_CACHE_ON,    // reuse a cached rendering when it is valid, and write it back on a cache miss
+    FF_LOGO_CACHE_OFF,   // ignore the image logo cache completely: neither read nor write it
+    FF_LOGO_CACHE_REGEN, // ignore any existing cached rendering and regenerate it
+} FFLogoCacheStrategy;
+
+// Which frame of the image source to render. 0 is the only value that prints an animation; the
+// others all produce a static image, which keeps the default (1, the first frame) byte-identical
+// to the behaviour before animations existed.
+#define FF_LOGO_ANIMATION_FRAME_FIRST 1
+#define FF_LOGO_ANIMATION_FRAME_ANIMATE 0
 
 typedef struct FFOptionsLogo {
     FFstrbuf source;
@@ -43,7 +56,11 @@ typedef struct FFOptionsLogo {
     uint32_t paddingBottom;
     bool printRemaining;
     bool preserveAspectRatio;
-    bool recache;
+    FFLogoCacheStrategy cache;
+    // 0 = animate, N > 0 = the N-th frame (1-based), N < 0 = the |N|-th frame from the end.
+    // Kept as given by the user: the cache entry name is built from it before the frame count
+    // is known, and negative values stay meaningful across runs (see image.c).
+    int32_t animationFrame;
 
 #if FF_HAVE_CHAFA
     bool chafaFgOnly;
@@ -54,8 +71,9 @@ typedef struct FFOptionsLogo {
 #endif
 } FFOptionsLogo;
 
+const char* ffLogoPositionToString(FFLogoPosition position);
 void ffOptionsInitLogo(FFOptionsLogo* options);
 bool ffOptionsParseLogoCommandLine(FFOptionsLogo* options, const char* key, const char* value);
 void ffOptionsDestroyLogo(FFOptionsLogo* options);
-const char* ffOptionsParseLogoJsonConfig(FFOptionsLogo* options, yyjson_val* root);
+const char* ffOptionsParseLogoJsonConfig(FFOptionsLogo* options, yyjson_val* root, yyjson_val** pkey);
 void ffOptionsGenerateLogoJsonConfig(FFdata* data, FFOptionsLogo* options);

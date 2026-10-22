@@ -9,12 +9,12 @@ static const FFlogo C[] = {
         .names = { "CachyOS" },
         .lines = FASTFETCH_DATATEXT_LOGO_CACHYOS,
         .colors = {
-            FF_COLOR_FG_CYAN,
             FF_COLOR_FG_GREEN,
+            FF_COLOR_FG_CYAN,
             FF_COLOR_FG_BLACK,
         },
         .colorKeys = FF_COLOR_FG_CYAN,
-        .colorTitle = FF_COLOR_FG_CYAN,
+        .colorTitle = FF_COLOR_FG_GREEN,
     },
     #endif
     #ifdef FASTFETCH_DATATEXT_LOGO_CACHYOS_SMALL
@@ -24,10 +24,24 @@ static const FFlogo C[] = {
         .type = FF_LOGO_LINE_TYPE_SMALL_BIT,
         .lines = FASTFETCH_DATATEXT_LOGO_CACHYOS_SMALL,
         .colors = {
+            FF_COLOR_FG_GREEN,
             FF_COLOR_FG_CYAN,
         },
         .colorKeys = FF_COLOR_FG_CYAN,
-        .colorTitle = FF_COLOR_FG_CYAN,
+        .colorTitle = FF_COLOR_FG_GREEN,
+    },
+    #endif
+    #ifdef FASTFETCH_DATATEXT_LOGO_CACHYOS_OLD_SMALL
+    // CachyOSOldSmall
+    {
+        .names = { "CachyOS_old_small" },
+        .type = FF_LOGO_LINE_TYPE_SMALL_BIT | FF_LOGO_LINE_TYPE_ALTER_BIT,
+        .lines = FASTFETCH_DATATEXT_LOGO_CACHYOS_OLD_SMALL,
+        .colors = {
+            FF_COLOR_FG_CYAN,
+        },
+        .colorKeys = FF_COLOR_FG_CYAN,
+        .colorTitle = FF_COLOR_FG_GREEN,
     },
     #endif
     #ifdef FASTFETCH_DATATEXT_LOGO_CALCULATE
@@ -46,7 +60,7 @@ static const FFlogo C[] = {
     #ifdef FASTFETCH_DATATEXT_LOGO_CALINIXOS
     // CalinixOS
     {
-        .names = { "Calinix", "calinixos" },
+        .names = { "CalinixOS" },
         .lines = FASTFETCH_DATATEXT_LOGO_CALINIXOS,
         .colors = {
             FF_COLOR_FG_MAGENTA,
@@ -58,7 +72,7 @@ static const FFlogo C[] = {
     #ifdef FASTFETCH_DATATEXT_LOGO_CALINIXOS_SMALL
     // CalinixOSSmall
     {
-        .names = { "Calinix_small", "calinixos_small" },
+        .names = { "CalinixOS_small" },
         .type = FF_LOGO_LINE_TYPE_SMALL_BIT,
         .lines = FASTFETCH_DATATEXT_LOGO_CALINIXOS_SMALL,
         .colors = {
@@ -95,7 +109,7 @@ static const FFlogo C[] = {
     #ifdef FASTFETCH_DATATEXT_LOGO_CELOS
     // CelOS
     {
-        .names = { "Cel", "celos", "cel-linux", "celos-linux" },
+        .names = { "CelOS" },
         .lines = FASTFETCH_DATATEXT_LOGO_CELOS,
         .colors = {
             FF_COLOR_FG_MAGENTA,
@@ -152,7 +166,7 @@ static const FFlogo C[] = {
     #ifdef FASTFETCH_DATATEXT_LOGO_CEREUS
     // Cereus
     {
-        .names = { "Cereus", "Cereus Linux" },
+        .names = { "Cereus" },
         .lines = FASTFETCH_DATATEXT_LOGO_CEREUS,
         .colors = {
             FF_COLOR_FG_256 "173",
@@ -208,6 +222,37 @@ static const FFlogo C[] = {
     {
         .names = { "Chimera" },
         .lines = FASTFETCH_DATATEXT_LOGO_CHIMERA_LINUX,
+        .colors = {
+            FF_COLOR_FG_RED,
+            FF_COLOR_FG_MAGENTA,
+            FF_COLOR_FG_BLUE,
+            FF_COLOR_FG_RED,
+        },
+        .colorKeys = FF_COLOR_FG_MAGENTA,
+        .colorTitle = FF_COLOR_FG_RED,
+    },
+    #endif
+    #ifdef FASTFETCH_DATATEXT_LOGO_CHIMERA_LINUX2
+    // Chimera2
+    {
+        .names = { "Chimera2" },
+        .type = FF_LOGO_LINE_TYPE_ALTER_BIT,
+        .lines = FASTFETCH_DATATEXT_LOGO_CHIMERA_LINUX2,
+        .colors = {
+            FF_COLOR_FG_BLUE,
+            FF_COLOR_FG_RED,
+            FF_COLOR_FG_MAGENTA,
+        },
+        .colorKeys = FF_COLOR_FG_MAGENTA,
+        .colorTitle = FF_COLOR_FG_RED,
+    },
+    #endif
+    #ifdef FASTFETCH_DATATEXT_LOGO_CHIMERA_LINUX_SMALL
+    // Chimera_small
+    {
+        .names = { "Chimera_small" },
+        .lines = FASTFETCH_DATATEXT_LOGO_CHIMERA_LINUX_SMALL,
+        .type = FF_LOGO_LINE_TYPE_SMALL_BIT,
         .colors = {
             FF_COLOR_FG_RED,
             FF_COLOR_FG_MAGENTA,
@@ -352,7 +397,7 @@ static const FFlogo C[] = {
     #ifdef FASTFETCH_DATATEXT_LOGO_FEDORA_COREOS
     // ContainerLinux
     {
-        .names = { "ContainerLinux", "Container Linux", "Container Linux by CoreOS" },
+        .names = { "CoreOS", "Container Linux by CoreOS" },
         .lines = FASTFETCH_DATATEXT_LOGO_FEDORA_COREOS,
         .colors = {
             FF_COLOR_FG_BLUE,

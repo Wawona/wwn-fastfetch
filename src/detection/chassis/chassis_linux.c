@@ -1,4 +1,5 @@
 #include "chassis.h"
+#include "common/endian.h"
 #include "common/io.h"
 #include "common/smbios.h"
 
@@ -21,7 +22,7 @@ const char* ffDetectChassis(FFChassisResult* result) {
         uint32_t chassisType = 0;
         if (ffReadFileData("/sys/firmware/devicetree/base/smbios/smbios/chassis/chassis-type", sizeof(chassisType), &chassisType)) // big endian
         {
-            chassisType = __builtin_bswap32(chassisType);
+            chassisType = FF_READ_BE(chassisType);
             const char* typeStr = ffChassisTypeToString(chassisType);
             if (typeStr) {
                 ffStrbufSetStatic(&result->type, typeStr);
@@ -35,5 +36,5 @@ const char* ffDetectChassis(FFChassisResult* result) {
             result->type.chars[0] = (char) toupper(result->type.chars[0]);
         }
     }
-    return NULL;
+    return nullptr;
 }

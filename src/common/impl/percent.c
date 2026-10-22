@@ -1,4 +1,5 @@
 #include "fastfetch.h"
+#include "common/debug.h"
 #include "common/percent.h"
 #include "common/color.h"
 #include "common/option.h"
@@ -17,7 +18,7 @@ static void appendOutputColor(FFstrbuf* buffer, const FFModuleArgs* module) {
 const char* ffPercentParseTypeJsonConfig(yyjson_val* jsonVal, FFPercentageTypeFlags* result) {
     if (yyjson_is_uint(jsonVal)) {
         *result = (FFPercentageTypeFlags) yyjson_get_uint(jsonVal);
-        return NULL;
+        return nullptr;
     }
     if (yyjson_is_arr(jsonVal)) {
         FFPercentageTypeFlags flags = 0;
@@ -27,6 +28,8 @@ const char* ffPercentParseTypeJsonConfig(yyjson_val* jsonVal, FFPercentageTypeFl
         yyjson_arr_foreach (jsonVal, idx, max, item) {
             const char* flag = yyjson_get_str(item);
             if (!flag) {
+                FF_DEBUG("A percent.type array entry is of JSON type %s, not a string",
+                    yyjson_get_type_desc(item));
                 return "Error: percent.type: invalid flag string";
             }
             if (ffStrEqualsIgnCase(flag, "num")) {
@@ -40,14 +43,16 @@ const char* ffPercentParseTypeJsonConfig(yyjson_val* jsonVal, FFPercentageTypeFl
             } else if (ffStrEqualsIgnCase(flag, "bar-monochrome")) {
                 flags |= FF_PERCENTAGE_TYPE_BAR_MONOCHROME_BIT;
             } else {
+                FF_DEBUG("Unknown percent.type flag \"%s\"", flag);
                 return "Error: percent.type: unknown flag string";
             }
         }
 
         *result = flags;
-        return NULL;
+        return nullptr;
     }
 
+    FF_DEBUG("percent.type is of JSON type %s", yyjson_get_type_desc(jsonVal));
     return "Error: usage: percent.type must be a number or an array of strings";
 }
 
@@ -83,14 +88,17 @@ void ffPercentAppendBar(FFstrbuf* buffer, double percent, FFPercentageModuleConf
 
         FFPercentageTypeFlags percentType = config.type == 0 ? options->percentType : config.type;
 
-        uint8_t blocksPercent = (uint8_t) (percent / 100.0 * options->barWidth + 0.5);
-        assert(blocksPercent <= options->barWidth);
+        uint8_t blocksPercent = 0;
+        if (percent > 0) {
+            double blocks = percent / 100.0 * options->barWidth + 0.5;
+            blocksPercent = (uint8_t) (blocks >= options->barWidth ? options->barWidth : blocks);
+        }
 
         bool autoColorElapsed = ffStrbufIgnCaseEqualS(&options->barColorElapsed, "auto");
 
         bool monochrome = (percentType & FF_PERCENTAGE_TYPE_BAR_MONOCHROME_BIT) || !autoColorElapsed;
         if (!options->pipe && options->barColorElapsed.length > 0 && monochrome) {
-            const char* color = NULL;
+            const char* color = nullptr;
             if (!autoColorElapsed) {
                 color = options->barColorElapsed.chars;
             } else if (green <= yellow) {
@@ -285,6 +293,7 @@ bool ffPercentParseJsonObject(yyjson_val* key, yyjson_val* value, FFPercentageMo
     return true;
 }
 
+[[gnu::cold]]
 void ffPercentGenerateJsonConfig(yyjson_mut_doc* doc, yyjson_mut_val* module, FFPercentageModuleConfig config) {
     yyjson_mut_val* percent = yyjson_mut_obj_add_obj(doc, module, "percent");
     yyjson_mut_obj_add_uint(doc, percent, "green", config.green);

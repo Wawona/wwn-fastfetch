@@ -1,4 +1,5 @@
 #include "diskio.h"
+#include "common/debug.h"
 #include "common/io.h"
 #include "common/properties.h"
 #include "common/strutil.h"
@@ -56,10 +57,12 @@ static const char* parseDiskIOCounters(int dfd, const char* devName, FFlist* res
         char sysBlockStat[PROC_FILE_BUFFSIZ];
         ssize_t fileSize = ffReadFileDataRelative(dfd, "stat", ARRAY_SIZE(sysBlockStat) - 1, sysBlockStat);
         if (fileSize <= 0) {
+            FF_DEBUG("failed to read stat file");
             return "failed to read stat file";
         }
         sysBlockStat[fileSize] = '\0';
         if (sscanf(sysBlockStat, "%" PRIu64 "%*u%" PRIu64 "%*u%" PRIu64 "%*u%" PRIu64 "%*u", &nRead, &sectorRead, &nWritten, &sectorWritten) <= 0) {
+            FF_DEBUG("invalid stat file format");
             return "invalid stat file format";
         }
     }
@@ -72,17 +75,18 @@ static const char* parseDiskIOCounters(int dfd, const char* devName, FFlist* res
     device->readCount = nRead;
     device->writeCount = nWritten;
 
-    return NULL;
+    return nullptr;
 }
 
 const char* ffDiskIOGetIoCounters(FFlist* result, FFDiskIOOptions* options) {
     FF_AUTO_CLOSE_DIR DIR* sysBlockDirp = opendir("/sys/block/");
-    if (sysBlockDirp == NULL) {
-        return "opendir(\"/sys/block/\") == NULL";
+    if (sysBlockDirp == nullptr) {
+        FF_DEBUG("opendir(\"/sys/block/\") failed: %s", strerror(errno));
+        return "opendir(\"/sys/block/\") == nullptr";
     }
 
     struct dirent* sysBlockEntry;
-    while ((sysBlockEntry = readdir(sysBlockDirp)) != NULL) {
+    while ((sysBlockEntry = readdir(sysBlockDirp)) != nullptr) {
         const char* const devName = sysBlockEntry->d_name;
 
         if (devName[0] == '.') {
@@ -95,5 +99,5 @@ const char* ffDiskIOGetIoCounters(FFlist* result, FFDiskIOOptions* options) {
         }
     }
 
-    return NULL;
+    return nullptr;
 }

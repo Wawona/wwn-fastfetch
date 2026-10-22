@@ -5,6 +5,17 @@
 #include "detection/editor/editor.h"
 #include "modules/editor/editor.h"
 
+// `FFEditorResult` owns four buffers and has no destructor of its own. Both entry points below
+// have to free them on the error path too — which used to be skipped, and which became the common
+// path once `ffDetectEditor()` started reporting an `$EDITOR` that does not name an executable
+// instead of quietly succeeding.
+static void destroyEditorResult(FFEditorResult* result) {
+    ffStrbufDestroy(&result->name);
+    ffStrbufDestroy(&result->path);
+    ffStrbufDestroy(&result->exe);
+    ffStrbufDestroy(&result->version);
+}
+
 bool ffPrintEditor(FFEditorOptions* options) {
     FFEditorResult result = {
         .type = "Unknown",
@@ -16,12 +27,13 @@ bool ffPrintEditor(FFEditorOptions* options) {
     const char* error = ffDetectEditor(&result);
 
     if (error) {
-        ffPrintError(FF_EDITOR_MODULE_NAME, 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "%s", error);
+        ffPrintError(FF_MODULE_GET_DISPLAY_NAME(Editor), 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "%s", error);
+        destroyEditorResult(&result);
         return false;
     }
 
     if (options->moduleArgs.outputFormat.length == 0) {
-        ffPrintLogoAndKey(FF_EDITOR_MODULE_NAME, 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT);
+        ffPrintLogoAndKey(FF_MODULE_GET_DISPLAY_NAME(Editor), 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT);
         if (result.exe.length) {
             ffStrbufWriteTo(&result.exe, stdout);
             if (result.version.length) {
@@ -32,7 +44,7 @@ bool ffPrintEditor(FFEditorOptions* options) {
         }
         putchar('\n');
     } else {
-        FF_PRINT_FORMAT_CHECKED(FF_EDITOR_MODULE_NAME, 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, ((FFformatarg[]) {
+        FF_PRINT_FORMAT_CHECKED(FF_MODULE_GET_DISPLAY_NAME(Editor), 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, ((FFformatarg[]) {
                                                                                                            FF_ARG(result.type, "type"),
                                                                                                            FF_ARG(result.name, "name"),
                                                                                                            FF_ARG(result.exe, "exe-name"),
@@ -41,10 +53,7 @@ bool ffPrintEditor(FFEditorOptions* options) {
                                                                                                        }));
     }
 
-    ffStrbufDestroy(&result.name);
-    ffStrbufDestroy(&result.path);
-    ffStrbufDestroy(&result.exe);
-    ffStrbufDestroy(&result.version);
+    destroyEditorResult(&result);
 
     return true;
 }
@@ -57,15 +66,16 @@ void ffParseEditorJsonObject(FFEditorOptions* options, yyjson_val* module) {
             continue;
         }
 
-        ffPrintError(FF_EDITOR_MODULE_NAME, 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "Unknown JSON key %s", unsafe_yyjson_get_str(key));
+        ffPrintError(FF_MODULE_GET_DISPLAY_NAME(Editor), 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT, "Unknown JSON key %s", unsafe_yyjson_get_str(key));
     }
 }
 
+[[gnu::cold]]
 void ffGenerateEditorJsonConfig(FFEditorOptions* options, yyjson_mut_doc* doc, yyjson_mut_val* module) {
     ffJsonConfigGenerateModuleArgsConfig(doc, module, &options->moduleArgs);
 }
 
-bool ffGenerateEditorJsonResult(FF_A_UNUSED FFEditorOptions* options, yyjson_mut_doc* doc, yyjson_mut_val* module) {
+bool ffGenerateEditorJsonResult([[maybe_unused]] FFEditorOptions* options, yyjson_mut_doc* doc, yyjson_mut_val* module) {
     FFEditorResult result = {
         .name = ffStrbufCreate(),
         .path = ffStrbufCreate(),
@@ -76,6 +86,7 @@ bool ffGenerateEditorJsonResult(FF_A_UNUSED FFEditorOptions* options, yyjson_mut
 
     if (error) {
         yyjson_mut_obj_add_str(doc, module, "error", error);
+        destroyEditorResult(&result);
         return false;
     }
 
@@ -86,10 +97,7 @@ bool ffGenerateEditorJsonResult(FF_A_UNUSED FFEditorOptions* options, yyjson_mut
     yyjson_mut_obj_add_strbuf(doc, obj, "exe", &result.exe);
     yyjson_mut_obj_add_strbuf(doc, obj, "version", &result.version);
 
-    ffStrbufDestroy(&result.name);
-    ffStrbufDestroy(&result.path);
-    ffStrbufDestroy(&result.exe);
-    ffStrbufDestroy(&result.version);
+    destroyEditorResult(&result);
 
     return true;
 }
@@ -103,8 +111,31 @@ void ffDestroyEditorOptions(FFEditorOptions* options) {
 }
 
 FFModuleBaseInfo ffEditorModuleInfo = {
-    .name = FF_EDITOR_MODULE_NAME,
+    .name = "Editor",
     .description = "Print information about the default editor ($VISUAL or $EDITOR)",
+    .displayName = {
+        .en = "Editor",
+        .ar = "المحرر",
+        .cs = "Editor",
+        .de = "Editor",
+        .es = "Editor",
+        .fi = "Editori",
+        .fr = "Éditeur",
+        .gl = "Editor",
+        .he = "עורך",
+        .id = "Editor",
+        .it = "Editor",
+        .ja = "エディター",
+        .ko = "편집기",
+        .pl = "Edytor",
+        .pt = "Editor",
+        .ru = "Редактор",
+        .tr = "Düzenleyici",
+        .uk = "Редактор",
+        .vi = "Trình soạn thảo",
+        .zh_CN = "编辑器",
+        .zh_TW = "編輯器",
+    },
     .initOptions = (void*) ffInitEditorOptions,
     .destroyOptions = (void*) ffDestroyEditorOptions,
     .parseJsonObject = (void*) ffParseEditorJsonObject,
@@ -117,5 +148,6 @@ FFModuleBaseInfo ffEditorModuleInfo = {
         { "Exe name of real path", "exe-name" },
         { "Full path of real path", "path" },
         { "Version", "version" },
-    }))
+    })),
+    .defaultOrder = 16,
 };

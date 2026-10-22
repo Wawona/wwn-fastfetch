@@ -1,5 +1,6 @@
 #include "smc_temps.h"
 #include "common/apple/cf_helpers.h"
+#include "common/debug.h"
 #include "common/strutil.h"
 
 #include <stdint.h>
@@ -83,10 +84,13 @@ static void smcUltostr(char* str, uint32_t val) {
 static const char* smcCall(io_connect_t conn, uint32_t selector, SmcKeyData_t* inputStructure, SmcKeyData_t* outputStructure) {
     size_t size = sizeof(SmcKeyData_t);
 
-    if (IOConnectCallStructMethod(conn, selector, inputStructure, size, outputStructure, &size) != kIOReturnSuccess) {
+    const IOReturn callStatus = IOConnectCallStructMethod(conn, selector, inputStructure, size, outputStructure, &size);
+    if (callStatus != kIOReturnSuccess) {
+        FF_DEBUG("IOConnectCallStructMethod(selector=%u, command=%u) failed: IOReturn 0x%08x",
+            selector, (uint32_t) (unsigned char) inputStructure->data8, (unsigned) callStatus);
         return "IOConnectCallStructMethod(conn) failed";
     }
-    return NULL;
+    return nullptr;
 }
 
 // Provides key info, using a cache to dramatically improve the energy impact of smcFanControl
@@ -103,7 +107,7 @@ static const char* smcGetKeyInfo(io_connect_t conn, const uint32_t key, SmcKeyDa
     }
 
     *key_info = outputStructure.keyInfo;
-    return NULL;
+    return nullptr;
 }
 
 static const char* smcReadSmcVal(io_connect_t conn, const UInt32Char_t key, SmcVal_t* val) {
@@ -130,29 +134,33 @@ static const char* smcReadSmcVal(io_connect_t conn, const UInt32Char_t key, SmcV
 
     memcpy(val->bytes, outputStructure.bytes, sizeof(outputStructure.bytes));
 
-    return NULL;
+    return nullptr;
 }
 
 static const char* smcOpen(io_connect_t* conn) {
     FF_IOOBJECT_AUTO_RELEASE io_object_t device = IOServiceGetMatchingService(MACH_PORT_NULL, IOServiceMatching("AppleSMC"));
     if (!device) {
+        FF_DEBUG("IOKit has no AppleSMC service");
         return "No SMC device found";
     }
 
-    if (IOServiceOpen(device, mach_task_self(), 0, conn) != kIOReturnSuccess) {
+    const IOReturn openStatus = IOServiceOpen(device, mach_task_self(), 0, conn);
+    if (openStatus != kIOReturnSuccess) {
+        FF_DEBUG("IOServiceOpen(AppleSMC) failed: IOReturn 0x%08x", (unsigned) openStatus);
         return "IOServiceOpen() failed";
     }
 
-    return NULL;
+    return nullptr;
 }
 
 static const char* smcReadValue(io_connect_t conn, const UInt32Char_t key, double* value) {
     SmcVal_t val = { 0 };
     const char* error = smcReadSmcVal(conn, key, &val);
-    if (error != NULL) {
+    if (error != nullptr) {
         return error;
     }
     if (val.dataSize == 0) {
+        FF_DEBUG("The SMC key %s reported a data size of 0", key);
         return "Empty SMC result";
     }
 
@@ -173,9 +181,12 @@ static const char* smcReadValue(io_connect_t conn, const UInt32Char_t key, doubl
                         *value = (double) ntohll(*(uint64_t*) (val.bytes));
                         break;
                     default:
+                        FF_DEBUG("SMC key %s: unsigned type %s has an unsupported size of %u bytes",
+                            key, val.dataType, val.dataSize);
                         return "Unsupported SMC unsigned integer data size";
                 }
             } else {
+                FF_DEBUG("SMC key %s: unsupported unsigned type %s", key, val.dataType);
                 return "Unsupported SMC unsigned data type";
             }
             break;
@@ -204,9 +215,13 @@ static const char* smcReadValue(io_connect_t conn, const UInt32Char_t key, doubl
                 } else if (ffStrEquals(val.dataType, "fpe2")) {
                     *value = ntohs(*(uint16_t*) (val.bytes)) / 4.0;
                 } else {
+                    FF_DEBUG("SMC key %s: unsupported fixed point type %s of %u bytes",
+                        key, val.dataType, val.dataSize);
                     return "Unsupported SMC floating point data type";
                 }
             } else {
+                FF_DEBUG("SMC key %s: unsupported floating point type %s of %u bytes",
+                    key, val.dataType, val.dataSize);
                 return "Unsupported SMC floating point data type";
             }
             break;
@@ -227,6 +242,8 @@ static const char* smcReadValue(io_connect_t conn, const UInt32Char_t key, doubl
                         *value = (double) ntohll(*(int64_t*) (val.bytes));
                         break;
                     default:
+                        FF_DEBUG("SMC key %s: signed type %s has an unsupported size of %u bytes",
+                            key, val.dataType, val.dataSize);
                         return "Unsupported SMC signed integer data size";
                 }
             } else if (val.dataType[1] == 'p' && val.dataSize == 2) // signed fixed point types
@@ -252,9 +269,12 @@ static const char* smcReadValue(io_connect_t conn, const UInt32Char_t key, doubl
                 } else if (ffStrEquals(val.dataType, "spf0")) {
                     *value = (int16_t) ntohs(*(int16_t*) (val.bytes)) / 1.0;
                 } else {
+                    FF_DEBUG("SMC key %s: unsupported signed fixed point type %s of %u bytes",
+                        key, val.dataType, val.dataSize);
                     return "Unsupported SMC signed integer data type";
                 }
             } else {
+                FF_DEBUG("SMC key %s: unsupported signed type %s", key, val.dataType);
                 return "Unsupported SMC signed data type";
             }
             break;
@@ -263,14 +283,18 @@ static const char* smcReadValue(io_connect_t conn, const UInt32Char_t key, doubl
             if (ffStrEquals(val.dataType, "{pwm") && val.dataSize == 2) {
                 *value = (double) ntohs(*(uint16_t*) (val.bytes)) * 100 / 65536.0;
             } else {
+                FF_DEBUG("SMC key %s: unsupported special type %s of %u bytes", key, val.dataType, val.dataSize);
                 return "Unsupported SMC special data type";
             }
             break;
 
         default:
+            FF_DEBUG("SMC key %s: unknown data type '%c%c' (%s) of %u bytes",
+                key, val.dataType[0] ? val.dataType[0] : '?', val.dataType[1] ? val.dataType[1] : '?',
+                val.dataType, val.dataSize);
             return "Unsupported SMC data type";
     }
-    return NULL;
+    return nullptr;
 }
 
 static bool detectTemp(io_connect_t conn, const char* sensor, double* sum) {
@@ -291,7 +315,7 @@ static io_connect_t conn;
 
 const char* ffDetectSmcSpecificTemp(const char* sensor, double* result) {
     if (!conn) {
-        if (smcOpen(&conn) != NULL) {
+        if (smcOpen(&conn) != nullptr) {
             conn = (io_connect_t) -1;
         }
     }
@@ -300,15 +324,16 @@ const char* ffDetectSmcSpecificTemp(const char* sensor, double* result) {
     }
 
     if (!detectTemp(conn, sensor, result)) {
+        FF_DEBUG("The SMC sensor %s could not be read, or read a value outside 10..120", sensor);
         return "Could not read SMC temperature";
     }
 
-    return NULL;
+    return nullptr;
 }
 
 const char* ffDetectSmcTemps(enum FFTempType type, double* result) {
     if (!conn) {
-        if (smcOpen(&conn) != NULL) {
+        if (smcOpen(&conn) != nullptr) {
             conn = (io_connect_t) -1;
         }
     }
@@ -392,6 +417,27 @@ const char* ffDetectSmcTemps(enum FFTempType type, double* result) {
             count += detectTemp(conn, "Tp0e", result); // CPU performance core 8
             break;
 
+        case FF_TEMP_CPU_M5X:
+            count += detectTemp(conn, "Tp00", result); // CPU super core 1
+            count += detectTemp(conn, "Tp04", result); // CPU super core 2
+            count += detectTemp(conn, "Tp08", result); // CPU super core 3
+            count += detectTemp(conn, "Tp0C", result); // CPU super core 4
+            count += detectTemp(conn, "Tp0G", result); // CPU super core 5
+            count += detectTemp(conn, "Tp0K", result); // CPU super core 6
+            count += detectTemp(conn, "Tp0O", result); // CPU performance core 1
+            count += detectTemp(conn, "Tp0R", result); // CPU performance core 2
+            count += detectTemp(conn, "Tp0U", result); // CPU performance core 3
+            count += detectTemp(conn, "Tp0X", result); // CPU performance core 4
+            count += detectTemp(conn, "Tp0a", result); // CPU performance core 5
+            count += detectTemp(conn, "Tp0d", result); // CPU performance core 6
+            count += detectTemp(conn, "Tp0g", result); // CPU performance core 7
+            count += detectTemp(conn, "Tp0j", result); // CPU performance core 8
+            count += detectTemp(conn, "Tp0m", result); // CPU performance core 9
+            count += detectTemp(conn, "Tp0p", result); // CPU performance core 10
+            count += detectTemp(conn, "Tp0u", result); // CPU performance core 11
+            count += detectTemp(conn, "Tp0y", result); // CPU performance core 12
+            break;
+
         case FF_TEMP_GPU_INTEL:
             count += detectTemp(conn, "TCGC", result); // GPU Intel Graphics
             goto gpu_unknown;
@@ -442,6 +488,17 @@ const char* ffDetectSmcTemps(enum FFTempType type, double* result) {
             count += detectTemp(conn, "Tg0k", result); // GPU 8
             break;
 
+        case FF_TEMP_GPU_M5X:
+            count += detectTemp(conn, "Tg0U", result); // GPU 1
+            count += detectTemp(conn, "Tg0X", result); // GPU 2
+            count += detectTemp(conn, "Tg0d", result); // GPU 3
+            count += detectTemp(conn, "Tg0g", result); // GPU 4
+            count += detectTemp(conn, "Tg0j", result); // GPU 5
+            count += detectTemp(conn, "Tg1Y", result); // GPU 6
+            count += detectTemp(conn, "Tg1c", result); // GPU 7
+            count += detectTemp(conn, "Tg1g", result); // GPU 8
+            break;
+
         case FF_TEMP_BATTERY:
             count += detectTemp(conn, "TB1T", result); // Battery
             count += detectTemp(conn, "TB2T", result); // Battery
@@ -452,14 +509,18 @@ const char* ffDetectSmcTemps(enum FFTempType type, double* result) {
             count += detectTemp(conn, "Tm06", result); // Memory 2
             count += detectTemp(conn, "Tm08", result); // Memory 3
             count += detectTemp(conn, "Tm09", result); // Memory 4
+            count += detectTemp(conn, "Tm0p", result); // Memory Proximity 1 (M4)
+            count += detectTemp(conn, "Tm1p", result); // Memory Proximity 2 (M4)
+            count += detectTemp(conn, "Tm2p", result); // Memory Proximity 3 (M4)
             break;
     }
 
+    FF_DEBUG("None of the SMC sensors for temp type %d reported a usable reading", (int) type);
     if (count == 0) {
         return "No temperatures detected";
     }
 
     *result /= count;
 
-    return NULL;
+    return nullptr;
 }

@@ -78,7 +78,7 @@ static uint32_t getArgumentIndex(const char* placeholderValue, uint32_t numArgs,
     }
 
     if (firstChar >= '0' && firstChar <= '9') {
-        char* pEnd = NULL;
+        char* pEnd = nullptr;
         uint32_t result = (uint32_t) strtoul(placeholderValue, &pEnd, 10);
         if (result > numArgs) {
             return UINT32_MAX;
@@ -109,10 +109,24 @@ static inline void appendInvalidPlaceholder(FFstrbuf* buffer, const char* start,
 }
 
 static inline bool formatArgSet(const FFformatarg* arg) {
-    return arg->value != NULL && ((arg->type == FF_ARG_TYPE_DOUBLE && *(double*) arg->value > 0.0) || (arg->type == FF_ARG_TYPE_FLOAT && *(float*) arg->value > 0.0) || (arg->type == FF_ARG_TYPE_INT && *(int32_t*) arg->value > 0) || (arg->type == FF_ARG_TYPE_STRBUF && ((FFstrbuf*) arg->value)->length > 0) || (arg->type == FF_ARG_TYPE_STRING && ffStrSet((char*) arg->value)) || (arg->type == FF_ARG_TYPE_UINT8 && *(uint8_t*) arg->value > 0) || (arg->type == FF_ARG_TYPE_UINT16 && *(uint16_t*) arg->value > 0) || (arg->type == FF_ARG_TYPE_UINT && *(uint32_t*) arg->value > 0) || (arg->type == FF_ARG_TYPE_UINT64 && *(uint64_t*) arg->value > 0) || (arg->type == FF_ARG_TYPE_BOOL && *(bool*) arg->value) || (arg->type == FF_ARG_TYPE_LIST && ((FFlist*) arg->value)->length > 0));
+    // clang-format off
+    return arg->value != nullptr && (
+        (arg->type == FF_ARG_TYPE_DOUBLE && *(double*) arg->value > 0.0) ||
+        (arg->type == FF_ARG_TYPE_FLOAT && *(float*) arg->value > 0.0) ||
+        (arg->type == FF_ARG_TYPE_INT && *(int32_t*) arg->value > 0) ||
+        (arg->type == FF_ARG_TYPE_STRBUF && ((FFstrbuf*) arg->value)->length > 0) ||
+        (arg->type == FF_ARG_TYPE_STRING && ffStrSet((char*) arg->value)) ||
+        (arg->type == FF_ARG_TYPE_UINT8 && *(uint8_t*) arg->value > 0) ||
+        (arg->type == FF_ARG_TYPE_UINT16 && *(uint16_t*) arg->value > 0) ||
+        (arg->type == FF_ARG_TYPE_UINT && *(uint32_t*) arg->value > 0) ||
+        (arg->type == FF_ARG_TYPE_UINT64 && *(uint64_t*) arg->value > 0) ||
+        (arg->type == FF_ARG_TYPE_BOOL && *(bool*) arg->value) ||
+        (arg->type == FF_ARG_TYPE_LIST && ((FFlist*) arg->value)->length > 0)
+    );
+    // clang-format on
 }
 
-FF_A_UNUSED static inline void normalizeArgName(FFstrbuf* dst, const char* src) {
+[[maybe_unused]] static inline void normalizeArgName(FFstrbuf* dst, const char* src) {
     ffStrbufClear(dst);
     bool flag = false;
     for (const char* p = src; *p; ++p) {
@@ -131,13 +145,28 @@ FF_A_UNUSED static inline void normalizeArgName(FFstrbuf* dst, const char* src) 
     #include "common/lua.h"
 
 static void appendLuaError(FFstrbuf* buffer, const char* prefix, lua_State* L) {
-    const char* err = lua_tolstring(L, -1, NULL);
+    const char* err = lua_tolstring(L, -1, nullptr);
     if (err) {
-        const char* tmp = strchr(err, ':');
-        if (tmp) {
-            err = tmp + 1;
-            while (*err == ' ') {
-                ++err;
+        // Drop the position Lua puts in front of an error and keep the message only. Both places
+        // that build one -- `luaG_addinfo` and `luaL_where` -- format it as `%s:%d: %s`, so a
+        // position is a colon, a line number, a colon and a space:
+        //   general.preload.lua:1: <name> expected near '='   -> <name> expected near '='
+        //   [string ""]:1: x                                  -> x
+        // Not every error has one, and cutting at the first colon mangled those. `luaL_loadfilex`
+        // reports `cannot open <path>: <strerror>`, where that colon is the one after the path, so
+        // the path -- the only part naming the problem -- was dropped and `No such file or
+        // directory` was left on its own. A colon followed by a line number does not identify a
+        // position either, because a path can contain one: `cannot open /tmp/x:12:y/nope.lua: ...`
+        // has to survive whole. The trailing space is what separates the two, and a real position
+        // always has it.
+        for (const char* colon = strchr(err, ':'); colon; colon = strchr(colon + 1, ':')) {
+            const char* line = colon + 1;
+            while (*line >= '0' && *line <= '9') {
+                ++line;
+            }
+            if (line > colon + 1 && line[0] == ':' && line[1] == ' ') {
+                err = line + 2;
+                break;
             }
         }
     }
@@ -191,7 +220,11 @@ static bool parseLuaString(FFstrbuf* buffer, const char* script, uint32_t script
                     lua_pushboolean(L, *(bool*) arg->value);
                     break;
                 case FF_ARG_TYPE_STRING:
-                    lua_pushlstring(L, (const char*) arg->value, strlen((const char*) arg->value));
+                    if (!arg->value) {
+                        lua_pushlstring(L, "", 0);
+                    } else {
+                        lua_pushlstring(L, (const char*) arg->value, strlen((const char*) arg->value));
+                    }
                     break;
                 case FF_ARG_TYPE_STRBUF: {
                     const FFstrbuf* sb = (const FFstrbuf*) arg->value;
@@ -228,12 +261,12 @@ static bool parseLuaString(FFstrbuf* buffer, const char* script, uint32_t script
                 ffStrbufAppendS(buffer, "Lua result error: no result");
             } else {
                 // Convert first result to string
-                const char* res = lua_tolstring(L, 1, NULL);
+                const char* res = lua_tolstring(L, 1, nullptr);
                 if (res) {
                     ffStrbufAppendS(buffer, res);
                 } else {
-                    luaL_tolstring(L, 1, NULL);
-                    const char* sval = lua_tolstring(L, -1, NULL);
+                    luaL_tolstring(L, 1, nullptr);
+                    const char* sval = lua_tolstring(L, -1, nullptr);
                     if (sval) {
                         ffStrbufAppendS(buffer, sval);
                     }
@@ -247,208 +280,67 @@ static bool parseLuaString(FFstrbuf* buffer, const char* script, uint32_t script
 }
 #endif
 
-#if FF_HAVE_QUICKJS
-    #include <quickjs.h>
-
-struct FFQuickJSData {
-    FF_LIBRARY_SYMBOL(JS_NewRuntime)
-    FF_LIBRARY_SYMBOL(JS_NewContext)
-    FF_LIBRARY_SYMBOL(JS_FreeRuntime)
-    FF_LIBRARY_SYMBOL(JS_EvalThis)
-    FF_LIBRARY_SYMBOL(JS_GetException)
-    FF_LIBRARY_SYMBOL(JS_ToCStringLen2)
-    FF_LIBRARY_SYMBOL(JS_FreeCString)
-    FF_LIBRARY_SYMBOL(JS_NewStringLen)
-    FF_LIBRARY_SYMBOL(JS_NewArray)
-    FF_LIBRARY_SYMBOL(JS_NewBigUint64)
-    FF_LIBRARY_SYMBOL(JS_SetPropertyUint32)
-    FF_LIBRARY_SYMBOL(JS_NewObject)
-    FF_LIBRARY_SYMBOL(JS_SetPropertyStr)
-    FF_LIBRARY_SYMBOL(JS_FreeValue)
-
-    JSRuntime* rt;
-    JSContext* ctx;
-    bool inited;
-} qjsData;
-
-static const char* loadQuickJSState(void) {
-    if (qjsData.inited) {
-        if (qjsData.ctx == NULL) {
-            return "QuickJS is not available";
-        }
-        return NULL;
+// Returns the length of the ANSI CSI sequence at `str`, or 0 if there is none.
+// A CSI sequence is `ESC [` + parameter bytes (0x30-0x3F) + intermediate bytes (0x20-0x2F) + final byte (0x40-0x7E)
+static uint32_t ansiEscapeLength(const char* str) {
+    if (str[0] != '\e' || str[1] != '[') {
+        return 0;
     }
 
-    qjsData.inited = true;
-    #ifdef _WIN32
-    FF_LIBRARY_LOAD_MESSAGE(libqjs, "libqjs-0" FF_LIBRARY_EXTENSION, 0)
-    #else
-    FF_LIBRARY_LOAD_MESSAGE(libqjs, "libqjs" FF_LIBRARY_EXTENSION, 0)
-    #endif
-
-    FF_LIBRARY_LOAD_SYMBOL_VAR_MESSAGE(libqjs, qjsData, JS_NewRuntime)
-    FF_LIBRARY_LOAD_SYMBOL_VAR_MESSAGE(libqjs, qjsData, JS_NewContext)
-    FF_LIBRARY_LOAD_SYMBOL_VAR_MESSAGE(libqjs, qjsData, JS_FreeRuntime)
-    FF_LIBRARY_LOAD_SYMBOL_VAR_MESSAGE(libqjs, qjsData, JS_EvalThis)
-    FF_LIBRARY_LOAD_SYMBOL_VAR_MESSAGE(libqjs, qjsData, JS_GetException)
-    FF_LIBRARY_LOAD_SYMBOL_VAR_MESSAGE(libqjs, qjsData, JS_ToCStringLen2)
-    FF_LIBRARY_LOAD_SYMBOL_VAR_MESSAGE(libqjs, qjsData, JS_FreeCString)
-    FF_LIBRARY_LOAD_SYMBOL_VAR_MESSAGE(libqjs, qjsData, JS_NewStringLen)
-    FF_LIBRARY_LOAD_SYMBOL_VAR_MESSAGE(libqjs, qjsData, JS_NewArray)
-    FF_LIBRARY_LOAD_SYMBOL_VAR_MESSAGE(libqjs, qjsData, JS_SetPropertyUint32)
-    FF_LIBRARY_LOAD_SYMBOL_VAR_MESSAGE(libqjs, qjsData, JS_NewObject)
-    FF_LIBRARY_LOAD_SYMBOL_VAR_MESSAGE(libqjs, qjsData, JS_SetPropertyStr)
-    FF_LIBRARY_LOAD_SYMBOL_VAR_MESSAGE(libqjs, qjsData, JS_FreeValue)
-
-    qjsData.rt = qjsData.ffJS_NewRuntime();
-    if (qjsData.rt == NULL) {
-        return "JS_NewRuntime() failed";
+    const char* p = str + 2;
+    while (*p >= '0' && *p <= '?') {
+        ++p;
     }
-
-    qjsData.ctx = qjsData.ffJS_NewContext(qjsData.rt);
-    if (qjsData.ctx == NULL) {
-        qjsData.ffJS_FreeRuntime(qjsData.rt);
-        qjsData.rt = NULL;
-        return "JS_NewContext() failed";
+    while (*p >= ' ' && *p <= '/') {
+        ++p;
     }
-
-    libqjs = NULL; // don't close quickjs
-
-    return NULL;
+    if (*p < '@' || *p > '~') {
+        return 0; // not a complete CSI sequence
+    }
+    return (uint32_t) (p - str) + 1;
 }
-
-static bool parseQuickJSString(FFstrbuf* buffer, const char* script, uint32_t scriptLen, uint32_t numArgs, const FFformatarg* arguments) {
-    const char* err = loadQuickJSState();
-    if (err) {
-        ffStrbufAppendF(buffer, "Qjs init error: %s", err);
-        return false;
-    }
-    JSContext* ctx = qjsData.ctx;
-    JSValue argsObj = qjsData.ffJS_NewObject(ctx);
-    FF_STRBUF_AUTO_DESTROY argNameBuf = ffStrbufCreate();
-
-    for (uint32_t i = 0; i < numArgs; ++i) {
-        const FFformatarg* arg = &arguments[i];
-
-        JSValue value;
-        switch (arg->type) {
-            case FF_ARG_TYPE_INT:
-                value = JS_NewInt32(ctx, *(int32_t*) arg->value);
-                break;
-            case FF_ARG_TYPE_UINT:
-                value = JS_NewUint32(ctx, *(uint32_t*) arg->value);
-                break;
-            case FF_ARG_TYPE_UINT64: {
-                uint64_t val = *(uint64_t*) arg->value;
-                if (val <= INT32_MAX) {
-                    value = JS_NewInt32(ctx, (int32_t) val);
-                } else {
-                    value = JS_NewFloat64(ctx, (double) val);
-                }
-                break;
-            }
-            case FF_ARG_TYPE_UINT16:
-                value = JS_NewUint32(ctx, *(uint16_t*) arg->value);
-                break;
-            case FF_ARG_TYPE_UINT8:
-                value = JS_NewUint32(ctx, *(uint8_t*) arg->value);
-                break;
-            case FF_ARG_TYPE_FLOAT:
-                value = JS_NewFloat64(ctx, *(float*) arg->value);
-                break;
-            case FF_ARG_TYPE_DOUBLE:
-                value = JS_NewFloat64(ctx, *(double*) arg->value);
-                break;
-            case FF_ARG_TYPE_BOOL:
-                value = JS_NewBool(ctx, *(bool*) arg->value);
-                break;
-            case FF_ARG_TYPE_STRING:
-                value = qjsData.ffJS_NewStringLen(ctx, (const char*) arg->value, strlen((const char*) arg->value));
-                break;
-            case FF_ARG_TYPE_STRBUF: {
-                const FFstrbuf* sb = (const FFstrbuf*) arg->value;
-                value = qjsData.ffJS_NewStringLen(ctx, sb->chars, sb->length);
-                break;
-            }
-            case FF_ARG_TYPE_LIST: {
-                const FFlist* list = (const FFlist*) arg->value;
-                JSValue arr = qjsData.ffJS_NewArray(ctx);
-                for (uint32_t li = 0; li < list->length; ++li) {
-                    const FFstrbuf* item = FF_LIST_GET(FFstrbuf, *list, li);
-                    JSValue itemValue = qjsData.ffJS_NewStringLen(ctx, item->chars, item->length);
-                    qjsData.ffJS_SetPropertyUint32(ctx, arr, li, itemValue);
-                }
-
-                value = arr;
-                break;
-            }
-            default:
-                value = JS_UNDEFINED;
-                break;
-        }
-
-        if (arg->name && arg->name[0]) {
-            normalizeArgName(&argNameBuf, arg->name);
-        } else {
-            ffStrbufSetF(&argNameBuf, "arg%" PRIu32, i + 1);
-        }
-        qjsData.ffJS_SetPropertyStr(ctx, argsObj, argNameBuf.chars, value);
-    }
-    JSValue result = qjsData.ffJS_EvalThis(ctx, argsObj, script, scriptLen, "", JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_STRICT);
-
-    qjsData.ffJS_FreeValue(ctx, argsObj);
-
-    bool ret = false;
-    if (JS_IsException(result)) {
-        JSValue exc = qjsData.ffJS_GetException(ctx);
-        const char* message = qjsData.ffJS_ToCStringLen2(ctx, NULL, exc, false);
-        qjsData.ffJS_FreeValue(ctx, exc);
-        ffStrbufAppendF(buffer, "Qjs runtime error: %s", message ?: "unknown");
-        if (message) {
-            qjsData.ffJS_FreeCString(ctx, message);
-        }
-    } else if (JS_IsUndefined(result)) {
-        ffStrbufAppendS(buffer, "Qjs result error: undefined result");
-    } else {
-        size_t len;
-        const char* res = qjsData.ffJS_ToCStringLen2(ctx, &len, result, false);
-        if (res) {
-            ffStrbufAppendNS(buffer, (uint32_t) len, res);
-            qjsData.ffJS_FreeCString(ctx, res);
-        }
-        ret = true;
-    }
-
-    qjsData.ffJS_FreeValue(ctx, result);
-    return ret;
-}
-#endif
 
 static bool skipAnsiEscape(FFstrbuf* in, FFstrbuf* out, FFstrbuf* trailingEscape) {
-    if (__builtin_expect(in->chars[0] == '\e' && in->chars[1] == '[', false)) {
-        // skip ANSI escape codes at the start of the string for truncation
-        const char* p = in->chars + 2;
-        while (*p && (ffCharIsDigit(*p) || *p == ';')) {
-            ++p;
+    // Skip all ANSI escape codes at the start of the string, so that they don't count
+    // towards the truncation / padding length. A value may carry more than one of them,
+    // e.g. `\e[31m\e[1m`.
+    uint32_t prefixLen = 0;
+    while (in->length - prefixLen >= 2) {
+        uint32_t len = ansiEscapeLength(in->chars + prefixLen);
+        if (len == 0) {
+            break;
         }
-        if (*p && isascii(*p)) {
-            ++p;
-        }
-        uint32_t prefixLen = (uint32_t) (p - in->chars);
-        ffStrbufAppendNS(out, prefixLen, in->chars);
-        ffStrbufSubstrAfter(in, prefixLen - 1);
-
-        if (trailingEscape) {
-            // likely have a `CSI m` reset at the end of the string
-            uint32_t iLastEscape = ffStrbufLastIndexC(in, '\e');
-            if (iLastEscape != in->length) {
-                ffStrbufSetNS(trailingEscape, in->length - iLastEscape, in->chars + iLastEscape);
-                ffStrbufSubstrBefore(in, iLastEscape);
-            }
-        }
-        return true;
+        prefixLen += len;
     }
-    return false;
+
+    if (prefixLen == 0) {
+        return false;
+    }
+
+    ffStrbufAppendNS(out, prefixLen, in->chars);
+    ffStrbufSubstrAfter(in, prefixLen - 1);
+
+    if (trailingEscape) {
+        // likely have one or more `CSI m` resets at the end of the string
+        uint32_t end = in->length;
+        while (end >= 3) {
+            uint32_t start = end - 1;
+            while (start > 0 && in->chars[start] != '\e') {
+                --start;
+            }
+            uint32_t len = ansiEscapeLength(in->chars + start);
+            if (len == 0 || start + len != end) {
+                break;
+            }
+            end = start;
+        }
+
+        if (end < in->length) {
+            ffStrbufSetNS(trailingEscape, in->length - end, in->chars + end);
+            ffStrbufSubstrBefore(in, end);
+        }
+    }
+    return true;
 }
 
 static bool parseFormatString(FFstrbuf* buffer, const FFstrbuf* formatstr, uint32_t numArgs, const FFformatarg* arguments) {
@@ -587,7 +479,7 @@ static bool parseFormatString(FFstrbuf* buffer, const FFstrbuf* formatstr, uint3
 
         // test for constant or env var, if so evaluate it
         if (firstChar == '$') {
-            char* pend = NULL;
+            char* pend = nullptr;
             int32_t indexSigned = (int32_t) strtol(placeholderValue.chars + 1, &pend, 10);
             if (pend == placeholderValue.chars + 1) {
                 // treat placeholder as an environment variable
@@ -620,7 +512,7 @@ static bool parseFormatString(FFstrbuf* buffer, const FFstrbuf* formatstr, uint3
             cSep = *pSep;
             *pSep = '\0';
         } else {
-            pSep = NULL;
+            pSep = nullptr;
         }
 
         uint32_t index = getArgumentIndex(placeholderValue.chars, numArgs, arguments);
@@ -646,7 +538,7 @@ static bool parseFormatString(FFstrbuf* buffer, const FFstrbuf* formatstr, uint3
             FF_STRBUF_AUTO_DESTROY trailingEscape = ffStrbufCreate();
             skipAnsiEscape(&tempString, buffer, &trailingEscape);
 
-            char* pEnd = NULL;
+            char* pEnd = nullptr;
             int32_t start = (int32_t) strtol(pSep + 1, &pEnd, 10);
             if (start < 0) {
                 start = (int32_t) tempString.length + start;
@@ -680,7 +572,7 @@ static bool parseFormatString(FFstrbuf* buffer, const FFstrbuf* formatstr, uint3
                 continue;
             }
         } else {
-            char* pEnd = NULL;
+            char* pEnd = nullptr;
             int32_t truncLength = (int32_t) strtol(pSep + 1, &pEnd, 10);
             if (*pEnd != '\0') {
                 *pSep = cSep;
@@ -744,12 +636,6 @@ static bool parseFormatString(FFstrbuf* buffer, const FFstrbuf* formatstr, uint3
 }
 
 bool ffParseFormatString(FFstrbuf* buffer, const FFstrbuf* formatstr, uint32_t numArgs, const FFformatarg* arguments) {
-#if FF_HAVE_QUICKJS
-    if (ffStrbufStartsWithS(formatstr, "qjs:")) {
-        return parseQuickJSString(buffer, formatstr->chars + 4, formatstr->length - 4, numArgs, arguments);
-    }
-#endif
-
 #if FF_HAVE_LUA
     if (ffStrbufStartsWithS(formatstr, "lua:")) {
         // If outputFormat starts with "lua:", treat the rest as a Lua script

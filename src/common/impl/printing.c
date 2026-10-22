@@ -3,11 +3,11 @@
 #include "common/textModifier.h"
 #include "logo/logo.h"
 
-void ffPrintLogoAndKey(const char* moduleName, uint8_t moduleIndex, const FFModuleArgs* moduleArgs, FFPrintType printType) {
+void ffPrintLogoAndKey(const char* moduleName, uint32_t moduleIndex, const FFModuleArgs* moduleArgs, FFPrintType printType) {
     ffLogoPrintLine();
 
     // This is used by --set-keyless, in this case we want neither the module name nor the separator
-    if (moduleName == NULL) {
+    if (moduleName == nullptr) {
         return;
     }
 
@@ -35,18 +35,19 @@ void ffPrintLogoAndKey(const char* moduleName, uint8_t moduleIndex, const FFModu
         if (instance.config.display.keyType & FF_MODULE_KEY_TYPE_STRING) {
             ffPrintCharTimes(' ', instance.config.display.keyType >> FF_MODULE_KEY_TYPE_SPACE_SHIFT);
 
-            // NULL check is required for modules with custom keys, e.g. disk with the folder path
+            // nullptr check is required for modules with custom keys, e.g. disk with the folder path
             if ((printType & FF_PRINT_TYPE_NO_CUSTOM_KEY) || !moduleArgs || moduleArgs->key.length == 0) {
                 fputs(moduleName, stdout);
 
                 if (moduleIndex > 0) {
-                    printf(" %hhu", moduleIndex);
+                    printf(" %u", moduleIndex);
                 }
             } else {
                 FF_STRBUF_AUTO_DESTROY key = ffStrbufCreate();
                 FF_PARSE_FORMAT_STRING_CHECKED(&key, &moduleArgs->key, ((FFformatarg[]) {
                                                                            FF_ARG(moduleIndex, "index"),
                                                                            FF_ARG(moduleArgs->keyIcon, "icon"),
+                                                                           FF_ARG(moduleName, "module-name"),
                                                                        }));
                 ffStrbufWriteTo(&key, stdout);
             }
@@ -81,10 +82,10 @@ void ffPrintLogoAndKey(const char* moduleName, uint8_t moduleIndex, const FFModu
     }
 }
 
-bool ffPrintFormat(const char* moduleName, uint8_t moduleIndex, const FFModuleArgs* moduleArgs, FFPrintType printType, uint32_t numArgs, const FFformatarg* arguments) {
+bool ffPrintFormat(const char* moduleName, uint32_t moduleIndex, const FFModuleArgs* moduleArgs, FFPrintType printType, uint32_t numArgs, const FFformatarg* arguments) {
     FF_STRBUF_AUTO_DESTROY buffer = ffStrbufCreate();
     bool success;
-    if (__builtin_expect(moduleArgs != NULL, 1)) {
+    if (__builtin_expect(moduleArgs != nullptr, 1)) {
         success = ffParseFormatString(&buffer, &moduleArgs->outputFormat, numArgs, arguments);
     } else {
         ffStrbufSetStatic(&buffer, "undefined format");
@@ -101,7 +102,7 @@ bool ffPrintFormat(const char* moduleName, uint8_t moduleIndex, const FFModuleAr
     return success;
 }
 
-void ffPrintError(const char* moduleName, uint8_t moduleIndex, const FFModuleArgs* moduleArgs, FFPrintType printType, const char* message, ...) {
+void ffPrintError(const char* moduleName, uint32_t moduleIndex, const FFModuleArgs* moduleArgs, FFPrintType printType, const char* message, ...) {
     if (!instance.config.display.showErrors) {
         return;
     }

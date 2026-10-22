@@ -1,4 +1,5 @@
 #include "gpu.h"
+#include "common/debug.h"
 #include "common/io.h"
 #include "common/strutil.h"
 
@@ -27,7 +28,7 @@ double ffGPUDetectTempFromTZ(void) {
         FF_STRBUF_AUTO_DESTROY buffer = ffStrbufCreate();
         int dfd = dirfd(dirp);
         struct dirent* entry;
-        while ((entry = readdir(dirp)) != NULL) {
+        while ((entry = readdir(dirp)) != nullptr) {
             if (entry->d_name[0] == '.') {
                 continue;
             }
@@ -51,5 +52,6 @@ double ffGPUDetectTempFromTZ(void) {
 
 const char* ffDetectGPUImpl(const FFGPUOptions* options, FFlist* gpus) {
     FF_UNUSED(options, gpus);
+    FF_DEBUG("No permission. Fallbacks to Vulkan, OpenCL or OpenGL instead");
     return "No permission. Fallbacks to Vulkan, OpenCL or OpenGL instead";
 }

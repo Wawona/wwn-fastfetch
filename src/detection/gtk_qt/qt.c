@@ -1,7 +1,9 @@
 #include "fastfetch.h"
 #include "common/properties.h"
-#include "common/thread.h"
+#include "common/io.h"
 #include "common/strutil.h"
+#include "common/FFcache.h"
+#include "common/mallocHelper.h"
 #include "detection/gtk_qt/gtk_qt.h"
 #include "detection/displayserver/displayserver.h"
 
@@ -16,7 +18,7 @@ static inline bool allValuesSet(const FFQtResult* result) {
         result->wallpaper.length > 0;
 }
 
-typedef enum FF_A_PACKED PlasmaCategory {
+typedef enum PlasmaCategory: uint8_t {
     PLASMA_CATEGORY_GENERAL,
     PLASMA_CATEGORY_KDE,
     PLASMA_CATEGORY_ICONS,
@@ -24,12 +26,12 @@ typedef enum FF_A_PACKED PlasmaCategory {
 } PlasmaCategory;
 
 static bool detectPlasmaFromFile(const char* filename, FFQtResult* result) {
-    FILE* kdeglobals = fopen(filename, "r");
-    if (kdeglobals == NULL) {
+    FF_AUTO_CLOSE_FILE FILE* kdeglobals = fopen(filename, "r");
+    if (kdeglobals == nullptr) {
         return false;
     }
 
-    char* line = NULL;
+    FF_AUTO_FREE char* line = nullptr;
     size_t len = 0;
 
     PlasmaCategory category = PLASMA_CATEGORY_OTHER;
@@ -71,10 +73,6 @@ static bool detectPlasmaFromFile(const char* filename, FFQtResult* result) {
             }
         }
     }
-
-    free(line);
-
-    fclose(kdeglobals);
 
     return true;
 }
@@ -153,7 +151,7 @@ static void detectQtCt(char qver, FFQtResult* result) {
 
         while (*p) {
             if (p[0] == '\\' && p[1] == 'x' && isxdigit(p[2]) && isxdigit(p[3]) && isxdigit(p[4]) && isxdigit(p[5])) {
-                uint32_t codepoint = (uint32_t) strtoul((char[]) { p[2], p[3], p[4], p[5], '\0' }, NULL, 16);
+                uint32_t codepoint = (uint32_t) strtoul((char[]) { p[2], p[3], p[4], p[5], '\0' }, nullptr, 16);
                 ffStrbufAppendUtf32CodePoint(&result->font, codepoint);
                 p += 6;
             } else {
@@ -172,38 +170,53 @@ static void detectKvantum(FFQtResult* result) {
                                                                });
 }
 
-const FFQtResult* ffDetectQt(void) {
-    static FFQtResult result;
+static FFQtResult result;
 
-    static bool init = false;
-    if (init) {
-        return &result;
-    }
-    init = true;
+static void initQtResult(void* storage) {
+    FFQtResult* qt = storage;
 
-    ffStrbufInit(&result.widgetStyle);
-    ffStrbufInit(&result.colorScheme);
-    ffStrbufInit(&result.icons);
-    ffStrbufInit(&result.font);
-    ffStrbufInit(&result.wallpaper);
+    ffStrbufInit(&qt->widgetStyle);
+    ffStrbufInit(&qt->colorScheme);
+    ffStrbufInit(&qt->icons);
+    ffStrbufInit(&qt->font);
+    ffStrbufInit(&qt->wallpaper);
 
     const FFDisplayServerResult* wmde = ffConnectDisplayServer();
 
     if (ffStrbufIgnCaseEqualS(&wmde->dePrettyName, FF_DE_PRETTY_PLASMA)) {
-        detectPlasma(&result);
+        detectPlasma(qt);
     } else if (ffStrbufIgnCaseEqualS(&wmde->dePrettyName, FF_DE_PRETTY_LXQT)) {
-        detectLXQt(&result);
+        detectLXQt(qt);
     } else {
         const char* qPlatformTheme = getenv("QT_QPA_PLATFORMTHEME");
         if (qPlatformTheme && (ffStrEquals(qPlatformTheme, "qt5ct") || ffStrEquals(qPlatformTheme, "qt6ct"))) {
-            detectQtCt(qPlatformTheme[2], &result);
+            detectQtCt(qPlatformTheme[2], qt);
         }
     }
 
-    if (ffStrbufEqualS(&result.widgetStyle, "kvantum") || ffStrbufEqualS(&result.widgetStyle, "kvantum-dark")) {
-        ffStrbufClear(&result.widgetStyle);
-        detectKvantum(&result);
+    if (ffStrbufEqualS(&qt->widgetStyle, "kvantum") || ffStrbufEqualS(&qt->widgetStyle, "kvantum-dark")) {
+        ffStrbufClear(&qt->widgetStyle);
+        detectKvantum(qt);
     }
+}
 
-    return &result;
+static void destroyQtResult(void* storage) {
+    FFQtResult* qt = storage;
+
+    ffStrbufDestroy(&qt->widgetStyle);
+    ffStrbufDestroy(&qt->colorScheme);
+    ffStrbufDestroy(&qt->icons);
+    ffStrbufDestroy(&qt->font);
+    ffStrbufDestroy(&qt->wallpaper);
+}
+
+static FFcacheEntry ffCacheEntryQt = {
+    .name = "qt",
+    .storage = &result,
+    .init = initQtResult,
+    .destroy = destroyQtResult,
+};
+
+const FFQtResult* ffDetectQt(void) {
+    return ffCacheGet(&ffCacheEntryQt);
 }
