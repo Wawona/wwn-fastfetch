@@ -1,4 +1,6 @@
-# Fastfetch
+# Fastfetch (`wwn-fastfetch`)
+
+> **Notice:** This repository is Wawona's fork of [fastfetch-cli/fastfetch](https://github.com/fastfetch-cli/fastfetch). It carries Wawona's in-process dispatch, embedded client build integration, and App Store compliance patches intended for eventual upstreaming.
 
 [![Benchmark](https://img.shields.io/badge/GitHub%20Pages-live-blue?logo=github)](https://fastfetch-cli.github.io/fastfetch/dev/bench)
 [![GitHub Workflow Status (with event)](https://img.shields.io/github/actions/workflow/status/fastfetch-cli/fastfetch/ci.yml)](https://github.com/fastfetch-cli/fastfetch/actions)
